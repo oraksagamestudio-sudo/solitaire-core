@@ -1,0 +1,73 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v9.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v9.0": {
+      "Solitaire.Cli/1.0.0": {
+        "dependencies": {
+          "Solitaire.Core": "1.0.0",
+          "Solitaire.FreeCell": "1.0.0",
+          "Solitaire.Klondike": "1.0.0"
+        },
+        "runtime": {
+          "Solitaire.Cli.dll": {}
+        }
+      },
+      "Solitaire.Core/1.0.0": {
+        "runtime": {
+          "Solitaire.Core.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "Solitaire.FreeCell/1.0.0": {
+        "dependencies": {
+          "Solitaire.Core": "1.0.0"
+        },
+        "runtime": {
+          "Solitaire.FreeCell.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "Solitaire.Klondike/1.0.0": {
+        "dependencies": {
+          "Solitaire.Core": "1.0.0"
+        },
+        "runtime": {
+          "Solitaire.Klondike.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Solitaire.Cli/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Solitaire.Core/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Solitaire.FreeCell/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Solitaire.Klondike/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

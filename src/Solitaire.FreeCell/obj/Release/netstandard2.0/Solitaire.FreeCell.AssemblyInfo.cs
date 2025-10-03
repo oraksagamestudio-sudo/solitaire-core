@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Solitaire.FreeCell")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ee127a08c2bfa27d7f1dbc9e1efd626d37b9e2fd")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c4736f7b0ada4c7fb362077b6f2337425f63f544")]
 [assembly: System.Reflection.AssemblyProductAttribute("Solitaire.FreeCell")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Solitaire.FreeCell")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -1,0 +1,139 @@
+{
+  "version": 3,
+  "targets": {
+    "net9.0": {
+      "Solitaire.Core/1.0.0": {
+        "type": "project",
+        "framework": ".NETStandard,Version=v2.0",
+        "compile": {
+          "bin/placeholder/Solitaire.Core.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Solitaire.Core.dll": {}
+        }
+      },
+      "Solitaire.FreeCell/1.0.0": {
+        "type": "project",
+        "framework": ".NETStandard,Version=v2.0",
+        "dependencies": {
+          "Solitaire.Core": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Solitaire.FreeCell.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Solitaire.FreeCell.dll": {}
+        }
+      },
+      "Solitaire.Klondike/1.0.0": {
+        "type": "project",
+        "framework": ".NETStandard,Version=v2.0",
+        "dependencies": {
+          "Solitaire.Core": "1.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Solitaire.Klondike.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Solitaire.Klondike.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Solitaire.Core/1.0.0": {
+      "type": "project",
+      "path": "../Solitaire.Core/Solitaire.Core.csproj",
+      "msbuildProject": "../Solitaire.Core/Solitaire.Core.csproj"
+    },
+    "Solitaire.FreeCell/1.0.0": {
+      "type": "project",
+      "path": "../Solitaire.FreeCell/Solitaire.FreeCell.csproj",
+      "msbuildProject": "../Solitaire.FreeCell/Solitaire.FreeCell.csproj"
+    },
+    "Solitaire.Klondike/1.0.0": {
+      "type": "project",
+      "path": "../Solitaire.Klondike/Solitaire.Klondike.csproj",
+      "msbuildProject": "../Solitaire.Klondike/Solitaire.Klondike.csproj"
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net9.0": [
+      "Solitaire.Core >= 1.0.0",
+      "Solitaire.FreeCell >= 1.0.0",
+      "Solitaire.Klondike >= 1.0.0"
+    ]
+  },
+  "packageFolders": {
+    "/Users/ahnhyemin/.nuget/packages/": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Cli/Solitaire.Cli.csproj",
+      "projectName": "Solitaire.Cli",
+      "projectPath": "/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Cli/Solitaire.Cli.csproj",
+      "packagesPath": "/Users/ahnhyemin/.nuget/packages/",
+      "outputPath": "/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Cli/obj/",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "/Users/ahnhyemin/.nuget/NuGet/NuGet.Config"
+      ],
+      "originalTargetFrameworks": [
+        "net9.0"
+      ],
+      "sources": {
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net9.0": {
+          "targetAlias": "net9.0",
+          "projectReferences": {
+            "/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Core/Solitaire.Core.csproj": {
+              "projectPath": "/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Core/Solitaire.Core.csproj"
+            },
+            "/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.FreeCell/Solitaire.FreeCell.csproj": {
+              "projectPath": "/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.FreeCell/Solitaire.FreeCell.csproj"
+            },
+            "/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/Solitaire.Klondike.csproj": {
+              "projectPath": "/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/Solitaire.Klondike.csproj"
+            }
+          }
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "9.0.300"
+    },
+    "frameworks": {
+      "net9.0": {
+        "targetAlias": "net9.0",
+        "imports": [
+          "net461",
+          "net462",
+          "net47",
+          "net471",
+          "net472",
+          "net48",
+          "net481"
+        ],
+        "assetTargetFallback": true,
+        "warn": true,
+        "frameworkReferences": {
+          "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          }
+        },
+        "runtimeIdentifierGraphPath": "/usr/local/share/dotnet/sdk/9.0.300/PortableRuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

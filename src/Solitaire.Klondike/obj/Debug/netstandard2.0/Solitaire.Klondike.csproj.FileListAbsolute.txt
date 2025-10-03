@@ -1,0 +1,14 @@
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/bin/Debug/netstandard2.0/Solitaire.Klondike.deps.json
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/bin/Debug/netstandard2.0/Solitaire.Klondike.dll
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/bin/Debug/netstandard2.0/Solitaire.Klondike.pdb
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/bin/Debug/netstandard2.0/Solitaire.Core.dll
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/bin/Debug/netstandard2.0/Solitaire.Core.pdb
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/obj/Debug/netstandard2.0/Solitaire.Klondike.csproj.AssemblyReference.cache
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/obj/Debug/netstandard2.0/Solitaire.Klondike.GeneratedMSBuildEditorConfig.editorconfig
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/obj/Debug/netstandard2.0/Solitaire.Klondike.AssemblyInfoInputs.cache
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/obj/Debug/netstandard2.0/Solitaire.Klondike.AssemblyInfo.cs
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/obj/Debug/netstandard2.0/Solitaire.Klondike.csproj.CoreCompileInputs.cache
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/obj/Debug/netstandard2.0/Solitaire.Klondike.sourcelink.json
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/obj/Debug/netstandard2.0/Solitair.E298F6B6.Up2Date
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/obj/Debug/netstandard2.0/Solitaire.Klondike.dll
+/Users/ahnhyemin/dev/solitaire-core/src/Solitaire.Klondike/obj/Debug/netstandard2.0/Solitaire.Klondike.pdb

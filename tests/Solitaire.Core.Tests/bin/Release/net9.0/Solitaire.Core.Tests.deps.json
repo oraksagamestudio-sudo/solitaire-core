@@ -10,6 +10,7 @@
         "dependencies": {
           "Microsoft.NET.Test.Sdk": "17.11.1",
           "Solitaire.Core": "1.0.0",
+          "Solitaire.FreeCell": "1.0.0",
           "coverlet.collector": "6.0.2",
           "xunit": "2.9.0",
           "xunit.runner.visualstudio": "2.8.2"
@@ -348,6 +349,17 @@
             "fileVersion": "1.0.0.0"
           }
         }
+      },
+      "Solitaire.FreeCell/1.0.0": {
+        "dependencies": {
+          "Solitaire.Core": "1.0.0"
+        },
+        "runtime": {
+          "Solitaire.FreeCell.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
       }
     }
   },
@@ -463,6 +475,11 @@
       "hashPath": "xunit.runner.visualstudio.2.8.2.nupkg.sha512"
     },
     "Solitaire.Core/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Solitaire.FreeCell/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
