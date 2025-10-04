@@ -242,7 +242,7 @@ namespace Solitaire.Cli
                     Console.WriteLine("createdAt=" + (rf.createdAt ?? ""));
                     Console.WriteLine("tags=[" + string.Join(",", rf.tags ?? new List<string>()) + "]");
                     Console.WriteLine("notes=" + (rf.notes ?? ""));
-                    Console.WriteLine("metadata: " + (rf.metadata != null ? string.Join(", ", rf.metadata.Select(kv => kv.Key + \"=\" + kv.Value)) : \"\")); 
+                    Console.WriteLine("metadata: " + (rf.metadata != null ? string.Join(", ", rf.metadata.Select(kv => kv.Key + "=" + kv.Value)) : ""));
                     break;
                 }
                 case "replay-diff":
