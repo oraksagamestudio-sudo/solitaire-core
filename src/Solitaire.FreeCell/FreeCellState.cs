@@ -5,22 +5,15 @@ using Solitaire.Core;
 
 namespace Solitaire.FreeCell
 {
-    /// <summary>
-    /// Immutable-like game state. Internally uses Lists for convenience,
-    /// but Apply creates new lists only for mutated piles (copy-on-write).
-    /// C# 7.3-compatible (no nullable reference type syntax / null-forgiving).
-    /// </summary>
     public sealed class FreeCellState : IGameState<Move>
     {
         public FreeCellConfig Config { get; }
         public uint Seed { get; }
         public int MoveCount { get; private set; }
 
-        // Piles
-        public Card?[] Cells { get; }                // size 4 (nullable value type OK in C# 7.3)
-        public List<Card>[] Tableaus { get; }        // size 8
-        /// <summary>Top rank per suit (0 = empty, 1..13 = Ace..King). Sum equals total cards in foundations.</summary>
-        public int[] FoundationTop { get; }          // size 4
+        public Card?[] Cells { get; }
+        public List<Card>[] Tableaus { get; }
+        public int[] FoundationTop { get; }
 
         public bool IsVictory => FoundationTop.Sum() == 52;
         public bool IsStalemate => !IsVictory && !GetLegalMoves().Any();
@@ -45,7 +38,6 @@ namespace Solitaire.FreeCell
 
             var tableaus = new List<Card>[config.Tableaus];
             for (int i = 0; i < tableaus.Length; i++) tableaus[i] = new List<Card>(7);
-            // Deal: columns 0..3 get 7 cards, 4..7 get 6 cards
             int k = 0;
             for (int col = 0; col < 8; col++)
             {
@@ -53,38 +45,59 @@ namespace Solitaire.FreeCell
                 for (int c = 0; c < count; c++) tableaus[col].Add(deck[k++]);
             }
             var cells = new Card?[config.Cells];
-            var foundationTop = new int[config.Foundations]; // all zeros
+            var foundationTop = new int[config.Foundations];
 
             return new FreeCellState(config, seed, 0, cells, tableaus, foundationTop);
         }
 
         public IEnumerable<Move> GetLegalMoves()
         {
-            // From tableaus
+            int emptyCells = 0;
+            for (int c = 0; c < Cells.Length; c++) if (!Cells[c].HasValue) emptyCells++;
+            int emptyTabs = 0;
+            for (int t = 0; t < Tableaus.Length; t++) if (Tableaus[t].Count == 0) emptyTabs++;
+
             for (int i = 0; i < Tableaus.Length; i++)
             {
                 if (Tableaus[i].Count == 0) continue;
-                var card = Tableaus[i][Tableaus[i].Count - 1];
+                var srcList = Tableaus[i];
+                var top = srcList[srcList.Count - 1];
 
-                // To foundation
-                if (CanPlaceOnFoundation(card))
-                    yield return new Move(MoveKind.TableauToFoundation, i, SuitIndex.ToIndex(card.Suit), 1);
+                if (CanPlaceOnFoundation(top))
+                    yield return new Move(MoveKind.TableauToFoundation, i, SuitIndex.ToIndex(top.Suit), 1);
 
-                // To any empty cell
                 for (int c = 0; c < Cells.Length; c++)
                     if (!Cells[c].HasValue)
                         yield return new Move(MoveKind.TableauToCell, i, c, 1);
 
-                // To other tableaus (single card for Phase 2)
                 for (int j = 0; j < Tableaus.Length; j++)
-                {
-                    if (j == i) continue;
-                    if (CanPlaceOnTableau(card, j))
+                    if (j != i && CanPlaceOnTableau(top, j))
                         yield return new Move(MoveKind.TableauToTableau, i, j, 1);
+
+                if (Config.AllowSequenceMoves)
+                {
+                    int run = TailRunLength(srcList);
+                    if (run > 1)
+                    {
+                        for (int j = 0; j < Tableaus.Length; j++)
+                        {
+                            if (j == i) continue;
+                            bool destEmpty = Tableaus[j].Count == 0;
+                            int maxByBuffer = ComputeMaxMovable(emptyCells, emptyTabs, destEmpty);
+                            int maxLen = Math.Min(run, maxByBuffer);
+                            if (maxLen <= 1) continue;
+
+                            for (int count = 2; count <= maxLen; count++)
+                            {
+                                var bottom = srcList[srcList.Count - count];
+                                if (CanPlaceOnTableauBottom(bottom, j))
+                                    yield return new Move(MoveKind.TableauToTableau, i, j, count);
+                            }
+                        }
+                    }
                 }
             }
 
-            // From cells
             for (int c = 0; c < Cells.Length; c++)
             {
                 if (!Cells[c].HasValue) continue;
@@ -101,7 +114,6 @@ namespace Solitaire.FreeCell
 
         public IGameState<Move> Apply(Move move)
         {
-            // Copy-on-write
             var cells = (Card?[])Cells.Clone();
             var tableaus = Tableaus.Select(list => new List<Card>(list)).ToArray();
             var ftop = (int[])FoundationTop.Clone();
@@ -150,20 +162,78 @@ namespace Solitaire.FreeCell
                 }
                 case MoveKind.TableauToTableau:
                 {
-                    if (move.Count != 1) throw new NotImplementedException("Sequence moves not yet supported.");
                     var src = tableaus[move.From];
                     if (src.Count == 0) throw new InvalidOperationException("Empty tableau.");
-                    var card = src[src.Count - 1];
-                    if (!CanPlaceOnTableau(card, move.To, tableaus))
-                        throw new InvalidOperationException("Illegal move.");
-                    src.RemoveAt(src.Count - 1);
-                    tableaus[move.To].Add(card);
+                    int count = move.Count;
+                    if (count < 1) throw new InvalidOperationException("Count must be >= 1.");
+                    if (count == 1)
+                    {
+                        var one = src[src.Count - 1];
+                        if (!CanPlaceOnTableau(one, move.To, tableaus))
+                            throw new InvalidOperationException("Illegal move.");
+                        src.RemoveAt(src.Count - 1);
+                        tableaus[move.To].Add(one);
+                    }
+                    else
+                    {
+                        if (!Config.AllowSequenceMoves) throw new InvalidOperationException("Sequence moves disabled.");
+                        if (src.Count < count) throw new InvalidOperationException("Source has fewer cards than requested.");
+                        if (!IsProperTailRun(src, count)) throw new InvalidOperationException("Slice is not a proper sequence.");
+                        var bottom = src[src.Count - count];
+
+                        int emptyCells = 0;
+                        for (int c = 0; c < cells.Length; c++) if (!cells[c].HasValue) emptyCells++;
+                        int emptyTabs = 0;
+                        for (int t = 0; t < tableaus.Length; t++) if (tableaus[t].Count == 0) emptyTabs++;
+                        bool destEmpty = tableaus[move.To].Count == 0;
+                        int maxByBuffer = ComputeMaxMovable(emptyCells, emptyTabs, destEmpty);
+                        if (count > maxByBuffer) throw new InvalidOperationException("Exceeds movable sequence size.");
+
+                        if (!CanPlaceOnTableauBottom(bottom, move.To, tableaus))
+                            throw new InvalidOperationException("Illegal destination for sequence.");
+
+                        var dst = tableaus[move.To];
+                        for (int k = src.Count - count; k < src.Count; k++) dst.Add(src[k]);
+                        src.RemoveRange(src.Count - count, count);
+                    }
                     break;
                 }
                 default: throw new NotSupportedException();
             }
 
             return new FreeCellState(Config, Seed, mc, cells, tableaus, ftop);
+        }
+
+        private static int TailRunLength(List<Card> pile)
+        {
+            int n = pile.Count;
+            if (n == 0) return 0;
+            int count = 1;
+            for (int i = n - 1; i - 1 >= 0; i--)
+            {
+                var a = pile[i];
+                var b = pile[i - 1];
+                bool colorsAlt = (a.Color != b.Color);
+                bool rankDesc = ((int)a.Rank == (int)b.Rank - 1);
+                if (colorsAlt && rankDesc) count++;
+                else break;
+            }
+            return count;
+        }
+
+        private static bool IsProperTailRun(List<Card> pile, int count)
+        {
+            if (count <= 0 || pile.Count < count) return false;
+            int n = pile.Count;
+            for (int i = n - count + 1; i < n; i++)
+            {
+                var a = pile[i];
+                var b = pile[i - 1];
+                bool colorsAlt = (a.Color != b.Color);
+                bool rankDesc = ((int)a.Rank == (int)b.Rank - 1);
+                if (!(colorsAlt && rankDesc)) return false;
+            }
+            return true;
         }
 
         private bool CanPlaceOnFoundation(Card card) => CanPlaceOnFoundation(card, FoundationTop);
@@ -177,15 +247,33 @@ namespace Solitaire.FreeCell
         private static bool CanPlaceOnTableau(Card card, int to, List<Card>[] tableaus)
         {
             var dst = tableaus[to];
-            if (dst.Count == 0)
-            {
-                // In classic FreeCell, ANY card may be moved to an empty tableau.
-                return true;
-            }
+            if (dst.Count == 0) return true;
             var target = dst[dst.Count - 1];
             bool colorsAlt = (card.Color != target.Color);
             bool rankIsOneLower = ((int)card.Rank == (int)target.Rank - 1);
             return colorsAlt && rankIsOneLower;
+        }
+
+        private bool CanPlaceOnTableauBottom(Card bottom, int to) => CanPlaceOnTableauBottom(bottom, to, Tableaus);
+        private static bool CanPlaceOnTableauBottom(Card bottom, int to, List<Card>[] tableaus)
+        {
+            var dst = tableaus[to];
+            if (dst.Count == 0) return true;
+            var target = dst[dst.Count - 1];
+            bool colorsAlt = (bottom.Color != target.Color);
+            bool rankIsOneLower = ((int)bottom.Rank == (int)target.Rank - 1);
+            return colorsAlt && rankIsOneLower;
+        }
+
+        private static int ComputeMaxMovable(int emptyCells, int emptyTableaus, bool destEmpty)
+        {
+            int k = emptyTableaus;
+            if (destEmpty) k = Math.Max(0, k - 1);
+            long max = (long)(emptyCells + 1);
+            for (int i = 0; i < k; i++) max *= 2;
+            if (max < 1) max = 1;
+            if (max > 52) max = 52;
+            return (int)max;
         }
     }
 }
