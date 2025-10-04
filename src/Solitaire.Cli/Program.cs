@@ -95,7 +95,7 @@ namespace Solitaire.Cli
                 {
                     EnsureFc();
                     var moves = _fc.GetLegalMoves().ToList();
-                    for (int i = 0; i < moves.Count; i++) Console.WriteLine((i + 1).ToString() + ". " + moves[i].ToString());
+                    for (int i = 0; i < moves.Count; i++) Console.WriteLine((i + 1) + ". " + moves[i]);
                     Console.WriteLine("Total legal moves: " + moves.Count);
                     break;
                 }
@@ -121,7 +121,7 @@ namespace Solitaire.Cli
                 case "save":
                 {
                     EnsureFc();
-                    if (args.Count < 2) { Console.WriteLine("Usage: save <path.json> [--note \"text\"] [--tag a,b,c]"); return; }
+                    if (args.Count < 2) { Console.WriteLine("Usage: save <path.json> [--note "text"] [--tag a,b,c]"); return; }
                     var path = args[1];
 
                     string note = "";
@@ -292,7 +292,7 @@ namespace Solitaire.Cli
                     for (int i = 0; i < scored.Count; i++)
                     {
                         var s = scored[i];
-                        Console.WriteLine((i+1).ToString() + ". " + s.move.ToString() + "  score=" + s.score + "  " + s.reason);
+                        Console.WriteLine((i+1) + ". " + s.move + "  score=" + s.score + "  " + s.reason);
                     }
                     break;
                 }
@@ -319,7 +319,7 @@ namespace Solitaire.Cli
                     int n = 1;
                     if (args.Count >= 2) int.TryParse(args[1], out n);
                     if (n < 1) n = 1;
-                    if (_log.Count == 0) { Console.WriteLine("[Undo] nothing to undo."); break; }
+                    if (_log.Count == 0) { Console.WriteLine("[Undo] nothing to undo.]"); break; }
                     if (n > _log.Count) n = _log.Count;
 
                     _log.RemoveRange(_log.Count - n, n);
@@ -426,7 +426,7 @@ namespace Solitaire.Cli
             Console.WriteLine("  fc-legal                     List legal moves");
             Console.WriteLine("  fc-move <Kind> <from> <to> [count]");
             Console.WriteLine("    Kinds: TableauToCell | CellToTableau | TableauToFoundation | CellToFoundation | TableauToTableau");
-            Console.WriteLine("  save <path.json> [--note \"text\"] [--tag a,b,c]  Save current game as replay JSON");
+            Console.WriteLine("  save <path.json> [--note "text"] [--tag a,b,c]  Save current game as replay JSON");
             Console.WriteLine("  replay <path.json> [--until N]  Replay file (apply first N moves)");
             Console.WriteLine("  load <path.json>             Load file and set current state to result");
             Console.WriteLine("  replay-info <path.json>      Show metadata/config/move count");
@@ -517,7 +517,7 @@ namespace Solitaire.Cli
             for (int i = 0; i < s.Cells.Length; i++)
             {
                 string token = s.Cells[i].HasValue ? RenderCardShort(s.Cells[i].Value, true) : "--";
-                csb.Append(RightPadVisible(token, CW) + "  ");
+                csb.append(RightPadVisible(token, CW) + "  ");
             }
             Console.WriteLine(csb.ToString());
 
@@ -534,15 +534,15 @@ namespace Solitaire.Cli
             int maxH = 0;
             for (int i = 0; i < s.Tableaus.Length; i++) if (s.Tableaus[i].Count > maxH) maxH = s.Tableaus[i].Count;
 
-            // Print rows from top to bottom
+            // Print rows top -> bottom so that bottom row shows TOP card (bottom aligned piles)
             for (int r = 0; r < maxH; r++)
             {
                 var line = new StringBuilder();
                 for (int col = 0; col < s.Tableaus.Length; col++)
                 {
                     var pile = s.Tableaus[col];
-                    int idx = pile.Count - 1 - r;
-                    string cell = idx >= 0 ? RenderCardShort(pile[idx], true) : "";
+                    int idx = r - (maxH - pile.Count);
+                    string cell = (idx >= 0 && idx < pile.Count) ? RenderCardShort(pile[idx], true) : "";
                     line.Append("  " + RightPadVisible(cell, CW));
                 }
                 Console.WriteLine(line.ToString());
@@ -592,13 +592,13 @@ namespace Solitaire.Cli
                 while (i < commandLine.Length && char.IsWhiteSpace(commandLine[i])) i++;
                 if (i >= commandLine.Length) yield break;
 
-                if (commandLine[i] == '\"')
+                if (commandLine[i] == '"')
                 {
                     i++;
                     int start = i;
-                    while (i < commandLine.Length && commandLine[i] != '\"') i++;
+                    while (i < commandLine.Length && commandLine[i] != '"') i++;
                     yield return commandLine.Substring(start, i - start);
-                    if (i < commandLine.Length && commandLine[i] == '\"') i++;
+                    if (i < commandLine.Length && commandLine[i] == '"') i++;
                 }
                 else
                 {
