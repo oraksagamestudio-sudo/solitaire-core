@@ -19,7 +19,7 @@ namespace Solitaire.Core.Tests
             s.Tableaus[0].AddRange(new [] { C(Suit.Spade, Rank.Eight), C(Suit.Heart, Rank.Seven),
                                             C(Suit.Spade, Rank.Six),  C(Suit.Heart, Rank.Five),
                                             C(Suit.Spade, Rank.Four), C(Suit.Heart, Rank.Three)});
-            s.Tableaus[1].Add(C(Suit.Heart, Rank.Nine));
+            s.Tableaus[1].Add(C(Suit.Club, Rank.Eight));
 
             for (int i = 2; i < 8; i++) s.Tableaus[i].Add(C(Suit.Club, Rank.King));
 

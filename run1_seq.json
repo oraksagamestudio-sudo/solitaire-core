@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "gameId": "FreeCell",
+  "seed": 777,
+  "config": {
+    "cells": 4,
+    "foundations": 4,
+    "tableaus": 8,
+    "allowSequenceMoves": true
+  },
+  "moves": [
+    {
+      "kind": "TableauToCell",
+      "from": 0,
+      "to": 0,
+      "count": 1
+    },
+    {
+      "kind": "TableauToTableau",
+      "from": 2,
+      "to": 4,
+      "count": 1
+    },
+    {
+      "kind": "TableauToTableau",
+      "from": 1,
+      "to": 2,
+      "count": 1
+    },
+    {
+      "kind": "TableauToCell",
+      "from": 6,
+      "to": 1,
+      "count": 1
+    },
+    {
+      "kind": "TableauToTableau",
+      "from": 7,
+      "to": 1,
+      "count": 1
+    },
+    {
+      "kind": "TableauToTableau",
+      "from": 7,
+      "to": 1,
+      "count": 1
+    },
+    {
+      "kind": "TableauToCell",
+      "from": 7,
+      "to": 2,
+      "count": 1
+    },
+    {
+      "kind": "TableauToTableau",
+      "from": 7,
+      "to": 6,
+      "count": 1
+    },
+    {
+      "kind": "CellToTableau",
+      "from": 1,
+      "to": 6,
+      "count": 1
+    },
+    {
+      "kind": "TableauToTableau",
+      "from": 3,
+      "to": 7,
+      "count": 1
+    },
+    {
+      "kind": "TableauToCell",
+      "from": 7,
+      "to": 1,
+      "count": 1
+    },
+    {
+      "kind": "TableauToCell",
+      "from": 7,
+      "to": 3,
+      "count": 1
+    },
+    {
+      "kind": "TableauToTableau",
+      "from": 7,
+      "to": 4,
+      "count": 1
+    },
+    {
+      "kind": "CellToTableau",
+      "from": 0,
+      "to": 7,
+      "count": 1
+    },
+    {
+      "kind": "TableauToTableau",
+      "from": 3,
+      "to": 7,
+      "count": 1
+    },
+    {
+      "kind": "TableauToTableau",
+      "from": 3,
+      "to": 6,
+      "count": 1
+    },
+    {
+      "kind": "CellToTableau",
+      "from": 1,
+      "to": 7,
+      "count": 1
+    },
+    {
+      "kind": "CellToTableau",
+      "from": 2,
+      "to": 6,
+      "count": 1
+    },
+    {
+      "kind": "TableauToCell",
+      "from": 3,
+      "to": 0,
+      "count": 1
+    },
+    {
+      "kind": "TableauToFoundation",
+      "from": 3,
+      "to": 1,
+      "count": 1
+    },
+    {
+      "kind": "TableauToCell",
+      "from": 3,
+      "to": 1,
+      "count": 1
+    },
+    {
+      "kind": "TableauToFoundation",
+      "from": 3,
+      "to": 0,
+      "count": 1
+    },
+    {
+      "kind": "CellToTableau",
+      "from": 0,
+      "to": 3,
+      "count": 1
+    }
+  ]
+}

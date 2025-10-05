@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Solitaire.Core")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c4736f7b0ada4c7fb362077b6f2337425f63f544")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+950a72672a86c76b2626cc403c49cd1a50f55e26")]
 [assembly: System.Reflection.AssemblyProductAttribute("Solitaire.Core")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Solitaire.Core")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
