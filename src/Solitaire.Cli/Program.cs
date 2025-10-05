@@ -51,7 +51,7 @@ namespace Solitaire.Cli
             {
                 Console.WriteLine("Solitaire CLI — REPL mode");
                 Console.WriteLine("Type 'help' to see commands. Type 'exit' to quit.");
-                while (true)
+                while (True)
                 {
                     Console.Write("> ");
                     var line = Console.ReadLine();
@@ -105,9 +105,10 @@ namespace Solitaire.Cli
                     if (args.Count < 4)
                     {
                         Console.WriteLine("Usage: fc-move <Kind> <from> <to> [count]");
+                        Console.WriteLine("  Kind aliases: t2t, t2c, c2t, t2f, c2f");
                         return;
                     }
-                    var kind = (MoveKind)Enum.Parse(typeof(MoveKind), args[1], true);
+                    var kind = ParseMoveKind(args[1]);
                     int from = int.Parse(args[2]);
                     int to = int.Parse(args[3]);
                     int count = (args.Count >= 5 ? int.Parse(args[4]) : 1);
@@ -355,6 +356,28 @@ namespace Solitaire.Cli
             }
         }
 
+        // ---- Parse move kind with aliases ----
+        static MoveKind ParseMoveKind(string token)
+        {
+            string t = token.Trim();
+            // Canonical names still supported
+            object parsed;
+            if (Enum.TryParse(typeof(MoveKind), t, true, out parsed))
+            {
+                return (MoveKind)parsed;
+            }
+            // Aliases
+            switch (t.ToLowerInvariant())
+            {
+                case "t2t": return MoveKind.TableauToTableau;
+                case "t2c": return MoveKind.TableauToCell;
+                case "c2t": return MoveKind.CellToTableau;
+                case "t2f": return MoveKind.TableauToFoundation;
+                case "c2f": return MoveKind.CellToFoundation;
+            }
+            throw new ArgumentException("Unknown move kind: " + token + " (try: t2t, t2c, c2t, t2f, c2f)");
+        }
+
         struct ScoredMove { public Move move; public int score; public string reason; }
         static IEnumerable<ScoredMove> ScoreMoves(FreeCellState s)
         {
@@ -425,7 +448,7 @@ namespace Solitaire.Cli
             Console.WriteLine("  fc-new --seed <u32>          Start a new FreeCell game");
             Console.WriteLine("  fc-legal                     List legal moves");
             Console.WriteLine("  fc-move <Kind> <from> <to> [count]");
-            Console.WriteLine("    Kinds: TableauToCell | CellToTableau | TableauToFoundation | CellToFoundation | TableauToTableau");
+            Console.WriteLine("    Kind aliases: t2t, t2c, c2t, t2f, c2f");
             Console.WriteLine("  save <path.json> [--note \"text\"] [--tag a,b,c]  Save current game as replay JSON");
             Console.WriteLine("  replay <path.json> [--until N]  Replay file (apply first N moves)");
             Console.WriteLine("  load <path.json>             Load file and set current state to result");
@@ -534,16 +557,15 @@ namespace Solitaire.Cli
             int maxH = 0;
             for (int i = 0; i < s.Tableaus.Length; i++) if (s.Tableaus[i].Count > maxH) maxH = s.Tableaus[i].Count;
 
-            // Print rows TOP -> BOTTOM so that the BOTTOM ROW shows each pile's TOP card (bottom aligned)
+            // Print rows TOP-aligned while flipping internal order (bottom->top)
             for (int r = 0; r < maxH; r++)
             {
                 var line = new StringBuilder();
                 for (int col = 0; col < s.Tableaus.Length; col++)
                 {
                     var pile = s.Tableaus[col];
-                    // when r == maxH-1 (bottom-most row), idx == pile.Count-1 (top card)
-                    int idx = r - (maxH - pile.Count);
-                    string cell = (idx >= 0 && idx < pile.Count) ? RenderCardShort(pile[idx], true) : "";
+                    int idx = r; // top-aligned: first printed row is bottom card index 0
+                    string cell = (idx < pile.Count) ? RenderCardShort(pile[idx], true) : "";
                     line.Append("  " + RightPadVisible(cell, CW));
                 }
                 Console.WriteLine(line.ToString());
