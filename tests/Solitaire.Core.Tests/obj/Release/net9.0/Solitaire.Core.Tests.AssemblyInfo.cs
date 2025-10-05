@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Solitaire.Core.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+950a72672a86c76b2626cc403c49cd1a50f55e26")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e8904a1904050203279a4d8c9edd7510eee4c6ef")]
 [assembly: System.Reflection.AssemblyProductAttribute("Solitaire.Core.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Solitaire.Core.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

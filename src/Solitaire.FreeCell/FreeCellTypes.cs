@@ -8,7 +8,9 @@ namespace Solitaire.FreeCell
         CellToTableau,
         TableauToFoundation,
         CellToFoundation,
-        TableauToTableau
+        TableauToTableau,
+        FoundationToTableau,   // 추가
+        FoundationToCell       // 추가
     }
 
     public readonly struct Index

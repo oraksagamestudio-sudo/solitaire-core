@@ -1,0 +1,13 @@
+// 1) MoveKind enum에 다음 항목을 추가하세요.
+//    FoundationToTableau, FoundationToCell
+// 예시:
+// public enum MoveKind
+// {
+//     TableauToCell,
+//     CellToTableau,
+//     TableauToFoundation,
+//     CellToFoundation,
+//     TableauToTableau,
+//     FoundationToTableau,   // 추가
+//     FoundationToCell       // 추가
+// }
