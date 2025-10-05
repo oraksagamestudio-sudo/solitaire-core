@@ -43,7 +43,8 @@ namespace Solitaire.Cli
         private static uint _currentSeed = 0;
         private static FreeCellConfig _currentConfig = FreeCellConfig.Default;
 
-        private static bool _pretty = false;
+        // Default pretty ON
+        private static bool _pretty = true;
 
         static int Main(string[] args)
         {
@@ -105,7 +106,8 @@ namespace Solitaire.Cli
                     if (args.Count < 4)
                     {
                         Console.WriteLine("Usage: fc-move <Kind> <from> <to> [count]");
-                        Console.WriteLine("  Kind aliases: t2t, t2c, c2t, t2f, c2f");
+                        Console.WriteLine("  Kind aliases: t2t, t2c, c2t, t2f, c2f, f2t, f2c");
+                        Console.WriteLine("  Index: foundations 0=Spade,1=Heart,2=Diamond,3=Club | cells 0..3 | tableaus 0..7");
                         return;
                     }
                     var kind = ParseMoveKind(args[1]);
@@ -360,10 +362,14 @@ namespace Solitaire.Cli
         static MoveKind ParseMoveKind(string token)
         {
             string t = token.Trim();
-            if (Enum.TryParse<MoveKind>(t, true, out var mk))
+
+            // Canonical names (if core supports them)
+            if (Enum.TryParse<MoveKind>(t, true, out var mkCanonical))
             {
-                return mk;
+                return mkCanonical;
             }
+
+            // Aliases
             switch (t.ToLowerInvariant())
             {
                 case "t2t": return MoveKind.TableauToTableau;
@@ -371,8 +377,20 @@ namespace Solitaire.Cli
                 case "c2t": return MoveKind.CellToTableau;
                 case "t2f": return MoveKind.TableauToFoundation;
                 case "c2f": return MoveKind.CellToFoundation;
+                case "f2t":
+                {
+                    if (Enum.TryParse<MoveKind>("FoundationToTableau", true, out var mkF2T))
+                        return mkF2T;
+                    throw new NotSupportedException("Foundation->Tableau moves are not supported by the current core build.");
+                }
+                case "f2c":
+                {
+                    if (Enum.TryParse<MoveKind>("FoundationToCell", true, out var mkF2C))
+                        return mkF2C;
+                    throw new NotSupportedException("Foundation->Cell moves are not supported by the current core build.");
+                }
             }
-            throw new ArgumentException("Unknown move kind: " + token + " (try: t2t, t2c, c2t, t2f, c2f)");
+            throw new ArgumentException("Unknown move kind: " + token + " (try: t2t, t2c, c2t, t2f, c2f, f2t, f2c)");
         }
 
         struct ScoredMove { public Move move; public int score; public string reason; }
@@ -445,7 +463,7 @@ namespace Solitaire.Cli
             Console.WriteLine("  fc-new --seed <u32>          Start a new FreeCell game");
             Console.WriteLine("  fc-legal                     List legal moves");
             Console.WriteLine("  fc-move <Kind> <from> <to> [count]");
-            Console.WriteLine("    Kind aliases: t2t, t2c, c2t, t2f, c2f");
+            Console.WriteLine("    Kind aliases: t2t, t2c, c2t, t2f, c2f, f2t, f2c");
             Console.WriteLine("  save <path.json> [--note \"text\"] [--tag a,b,c]  Save current game as replay JSON");
             Console.WriteLine("  replay <path.json> [--until N]  Replay file (apply first N moves)");
             Console.WriteLine("  load <path.json>             Load file and set current state to result");
@@ -455,7 +473,7 @@ namespace Solitaire.Cli
             Console.WriteLine("  auto-foundation              Auto-apply all legal moves to foundations");
             Console.WriteLine("  undo [N]                     Undo last N moves (rebuilds from seed)");
             Console.WriteLine("  board                        Print current board");
-            Console.WriteLine("  pretty on|off                Toggle ANSI colored board rendering");
+            Console.WriteLine("  pretty on|off                Toggle ANSI colored board rendering (default ON)");
             Console.WriteLine();
             Console.WriteLine("Index notes:");
             Console.WriteLine("  Tableaus: 0..7  | Cells: 0..3  | Foundations(suit index): 0=Spade,1=Heart,2=Diamond,3=Club");
