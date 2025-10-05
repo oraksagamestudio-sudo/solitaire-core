@@ -38,7 +38,7 @@ namespace Solitaire.Cli
 
     class Program
     {
-        private static FreeCellState _fc = null;
+        private static FreeCellState? _fc = null;
         private static List<Move> _log = new List<Move>();
         private static uint _currentSeed = 0;
         private static FreeCellConfig _currentConfig = FreeCellConfig.Default;
@@ -51,7 +51,7 @@ namespace Solitaire.Cli
             {
                 Console.WriteLine("Solitaire CLI — REPL mode");
                 Console.WriteLine("Type 'help' to see commands. Type 'exit' to quit.");
-                while (True)
+                while (true)
                 {
                     Console.Write("> ");
                     var line = Console.ReadLine();
@@ -88,13 +88,13 @@ namespace Solitaire.Cli
                     _fc = FreeCellState.NewGame(seed, _currentConfig);
                     _log.Clear();
                     Console.WriteLine("[FreeCell] New game. Seed=" + seed);
-                    DumpFreeCell(_fc);
+                    DumpFreeCell(_fc!);
                     break;
                 }
                 case "fc-legal":
                 {
                     EnsureFc();
-                    var moves = _fc.GetLegalMoves().ToList();
+                    var moves = _fc!.GetLegalMoves().ToList();
                     for (int i = 0; i < moves.Count; i++) Console.WriteLine((i + 1).ToString() + ". " + moves[i].ToString());
                     Console.WriteLine("Total legal moves: " + moves.Count);
                     break;
@@ -113,10 +113,10 @@ namespace Solitaire.Cli
                     int to = int.Parse(args[3]);
                     int count = (args.Count >= 5 ? int.Parse(args[4]) : 1);
                     var m = new Move(kind, from, to, count);
-                    _fc = (FreeCellState)_fc.Apply(m);
+                    _fc = (FreeCellState)_fc!.Apply(m);
                     _log.Add(m);
                     Console.WriteLine("[OK] Move applied.");
-                    DumpFreeCell(_fc);
+                    DumpFreeCell(_fc!);
                     break;
                 }
                 case "save":
@@ -202,7 +202,7 @@ namespace Solitaire.Cli
                     ).ToList();
 
                     Console.WriteLine("[Replayed] applied " + applied + " moves of " + rf.moves.Count);
-                    DumpFreeCell(_fc);
+                    DumpFreeCell(_fc!);
                     break;
                 }
                 case "load":
@@ -230,7 +230,7 @@ namespace Solitaire.Cli
                     ).ToList();
 
                     Console.WriteLine("[Loaded] " + path + " | moves=" + applied);
-                    DumpFreeCell(_fc);
+                    DumpFreeCell(_fc!);
                     break;
                 }
                 case "replay-info":
@@ -288,7 +288,7 @@ namespace Solitaire.Cli
                     EnsureFc();
                     int topN = 5;
                     if (args.Count >= 2) int.TryParse(args[1], out topN);
-                    var scored = ScoreMoves(_fc).OrderByDescending(x => x.score).Take(topN).ToList();
+                    var scored = ScoreMoves(_fc!).OrderByDescending(x => x.score).Take(topN).ToList();
                     if (scored.Count == 0) { Console.WriteLine("(no legal moves)"); break; }
                     for (int i = 0; i < scored.Count; i++)
                     {
@@ -303,15 +303,15 @@ namespace Solitaire.Cli
                     int applied = 0;
                     while (true)
                     {
-                        var move = _fc.GetLegalMoves().FirstOrDefault(m =>
+                        var move = _fc!.GetLegalMoves().FirstOrDefault(m =>
                             m.Kind == MoveKind.TableauToFoundation || m.Kind == MoveKind.CellToFoundation);
                         if (move.Kind == 0 && move.From == 0 && move.To == 0 && move.Count == 0) break;
-                        _fc = (FreeCellState)_fc.Apply(move);
+                        _fc = (FreeCellState)_fc!.Apply(move);
                         _log.Add(move);
                         applied++;
                     }
                     Console.WriteLine("[Auto] foundation moves applied: " + applied);
-                    DumpFreeCell(_fc);
+                    DumpFreeCell(_fc!);
                     break;
                 }
                 case "undo":
@@ -328,13 +328,13 @@ namespace Solitaire.Cli
                     foreach (var m in _log) s2 = (FreeCellState)s2.Apply(m);
                     _fc = s2;
                     Console.WriteLine("[Undo] reverted " + n + " move(s).");
-                    DumpFreeCell(_fc);
+                    DumpFreeCell(_fc!);
                     break;
                 }
                 case "board":
                 {
                     EnsureFc();
-                    DumpFreeCell(_fc);
+                    DumpFreeCell(_fc!);
                     break;
                 }
                 case "pretty":
@@ -360,13 +360,10 @@ namespace Solitaire.Cli
         static MoveKind ParseMoveKind(string token)
         {
             string t = token.Trim();
-            // Canonical names still supported
-            object parsed;
-            if (Enum.TryParse(typeof(MoveKind), t, true, out parsed))
+            if (Enum.TryParse<MoveKind>(t, true, out var mk))
             {
-                return (MoveKind)parsed;
+                return mk;
             }
-            // Aliases
             switch (t.ToLowerInvariant())
             {
                 case "t2t": return MoveKind.TableauToTableau;
@@ -557,14 +554,14 @@ namespace Solitaire.Cli
             int maxH = 0;
             for (int i = 0; i < s.Tableaus.Length; i++) if (s.Tableaus[i].Count > maxH) maxH = s.Tableaus[i].Count;
 
-            // Print rows TOP-aligned while flipping internal order (bottom->top)
+            // Print rows TOP-aligned (no bottom-sticking), while showing bottom->top within each column
             for (int r = 0; r < maxH; r++)
             {
                 var line = new StringBuilder();
                 for (int col = 0; col < s.Tableaus.Length; col++)
                 {
                     var pile = s.Tableaus[col];
-                    int idx = r; // top-aligned: first printed row is bottom card index 0
+                    int idx = r; // 0=bottom card, grows upward; top card appears on lower rows for taller piles
                     string cell = (idx < pile.Count) ? RenderCardShort(pile[idx], true) : "";
                     line.Append("  " + RightPadVisible(cell, CW));
                 }
