@@ -43,7 +43,7 @@ namespace Solitaire.Cli
         private static uint _currentSeed = 0;
         private static FreeCellConfig _currentConfig = FreeCellConfig.Default;
 
-        // Default pretty ON
+        // default pretty = ON
         private static bool _pretty = true;
 
         static int Main(string[] args)
@@ -106,8 +106,7 @@ namespace Solitaire.Cli
                     if (args.Count < 4)
                     {
                         Console.WriteLine("Usage: fc-move <Kind> <from> <to> [count]");
-                        Console.WriteLine("  Kind aliases: t2t, t2c, c2t, t2f, c2f, f2t, f2c");
-                        Console.WriteLine("  Index: foundations 0=Spade,1=Heart,2=Diamond,3=Club | cells 0..3 | tableaus 0..7");
+                        Console.WriteLine("  Kind aliases: t2t, t2c, c2t, t2f, c2f");
                         return;
                     }
                     var kind = ParseMoveKind(args[1]);
@@ -121,10 +120,28 @@ namespace Solitaire.Cli
                     DumpFreeCell(_fc!);
                     break;
                 }
+                case "fc-f2t":
+                {
+                    EnsureFc();
+                    if (args.Count < 3) { Console.WriteLine("Usage: fc-f2t <foundationIndex 0..3> <tableauIndex 0..N-1>"); return; }
+                    int f = int.Parse(args[1]);
+                    int t = int.Parse(args[2]);
+                    FoundationPop("t", f, t);
+                    break;
+                }
+                case "fc-f2c":
+                {
+                    EnsureFc();
+                    if (args.Count < 3) { Console.WriteLine("Usage: fc-f2c <foundationIndex 0..3> <cellIndex 0..C-1>"); return; }
+                    int f = int.Parse(args[1]);
+                    int c = int.Parse(args[2]);
+                    FoundationPop("c", f, c);
+                    break;
+                }
                 case "save":
                 {
                     EnsureFc();
-                    if (args.Count < 2) { Console.WriteLine("Usage: save <path.json> [--note \"text\"] [--tag a,b,c]"); return; }
+                    if (args.Count < 2) { Console.WriteLine("Usage: save <path.json> [--note "text"] [--tag a,b,c]"); return; }
                     var path = args[1];
 
                     string note = "";
@@ -358,18 +375,106 @@ namespace Solitaire.Cli
             }
         }
 
+        // ---- Foundation "pop" via rewind & branch ----
+        static void FoundationPop(string destType, int foundationIndex, int destIndex)
+        {
+            if (_fc == null) throw new InvalidOperationException("No FreeCell game.");
+            if (foundationIndex < 0 || foundationIndex > 3) throw new ArgumentOutOfRangeException(nameof(foundationIndex));
+            if (destType == "t")
+            {
+                if (destIndex < 0 || destIndex >= _currentConfig.Tableaus) throw new ArgumentOutOfRangeException(nameof(destIndex));
+            }
+            else if (destType == "c")
+            {
+                if (destIndex < 0 || destIndex >= _currentConfig.Cells) throw new ArgumentOutOfRangeException(nameof(destIndex));
+            }
+            else throw new ArgumentException("destType must be 't' or 'c'");
+
+            var topRank = _fc!.FoundationTop[foundationIndex];
+            if (topRank == 0)
+            {
+                Console.WriteLine("[F-POP] Foundation " + foundationIndex + " is empty.");
+                return;
+            }
+
+            // find last move that placed to this foundation
+            int idx = -1;
+            for (int i = _log.Count - 1; i >= 0; i--)
+            {
+                var m = _log[i];
+                if ((m.Kind == MoveKind.TableauToFoundation || m.Kind == MoveKind.CellToFoundation) && m.To == foundationIndex)
+                {
+                    idx = i; break;
+                }
+            }
+            if (idx < 0)
+            {
+                Console.WriteLine("[F-POP] Can't locate the move that placed the current top on foundation " + foundationIndex + ". It might come from a previous session.");
+                return;
+            }
+
+            // Rebuild up to idx (exclusive)
+            var s2 = FreeCellState.NewGame(_currentSeed, _currentConfig);
+            for (int i = 0; i < idx; i++) s2 = (FreeCellState)s2.Apply(_log[i]);
+            var placingMove = _log[idx];
+
+            // Build branch move candidate
+            Move? branch = null;
+            if (destType == "t")
+            {
+                if (placingMove.Kind == MoveKind.TableauToFoundation)
+                    branch = new Move(MoveKind.TableauToTableau, placingMove.From, destIndex, 1);
+                else // from cell
+                    branch = new Move(MoveKind.CellToTableau, placingMove.From, destIndex, 1);
+            }
+            else // destType == "c"
+            {
+                if (placingMove.Kind == MoveKind.TableauToFoundation)
+                    branch = new Move(MoveKind.TableauToCell, placingMove.From, destIndex, 1);
+                else
+                {
+                    // from cell -> returning to same cell is effectively done by rewind; other cells need two-step which we don't synthesize here
+                    if (placingMove.From != destIndex)
+                    {
+                        Console.WriteLine("[F-POP] The card originally came from cell " + placingMove.From + ". Can only return to the same cell.");
+                        return;
+                    }
+                    branch = null; // no-op; rewind already places it there
+                }
+            }
+
+            // Validate legality before mutating state/log
+            if (branch.HasValue)
+            {
+                bool legal = s2.GetLegalMoves().Any(m => m.Kind == branch.Value.Kind && m.From == branch.Value.From && m.To == branch.Value.To && m.Count == branch.Value.Count);
+                if (!legal)
+                {
+                    Console.WriteLine("[F-POP] Illegal branch move at that point in history: " + branch.Value.ToString());
+                    return;
+                }
+            }
+
+            int dropped = _log.Count - idx; // idx..end will be discarded
+            _log.RemoveRange(idx, dropped);
+            _fc = s2;
+            if (branch.HasValue)
+            {
+                _fc = (FreeCellState)_fc.Apply(branch.Value);
+                _log.Add(branch.Value);
+            }
+
+            Console.WriteLine("[F-POP] Rewound " + dropped + " move(s) and branched " + (branch.HasValue ? "with: " + branch.Value.ToString() : "(no-op to original cell)"));
+            DumpFreeCell(_fc);
+        }
+
         // ---- Parse move kind with aliases ----
         static MoveKind ParseMoveKind(string token)
         {
             string t = token.Trim();
-
-            // Canonical names (if core supports them)
-            if (Enum.TryParse<MoveKind>(t, true, out var mkCanonical))
+            if (Enum.TryParse<MoveKind>(t, true, out var mk))
             {
-                return mkCanonical;
+                return mk;
             }
-
-            // Aliases
             switch (t.ToLowerInvariant())
             {
                 case "t2t": return MoveKind.TableauToTableau;
@@ -377,20 +482,8 @@ namespace Solitaire.Cli
                 case "c2t": return MoveKind.CellToTableau;
                 case "t2f": return MoveKind.TableauToFoundation;
                 case "c2f": return MoveKind.CellToFoundation;
-                case "f2t":
-                {
-                    if (Enum.TryParse<MoveKind>("FoundationToTableau", true, out var mkF2T))
-                        return mkF2T;
-                    throw new NotSupportedException("Foundation->Tableau moves are not supported by the current core build.");
-                }
-                case "f2c":
-                {
-                    if (Enum.TryParse<MoveKind>("FoundationToCell", true, out var mkF2C))
-                        return mkF2C;
-                    throw new NotSupportedException("Foundation->Cell moves are not supported by the current core build.");
-                }
             }
-            throw new ArgumentException("Unknown move kind: " + token + " (try: t2t, t2c, c2t, t2f, c2f, f2t, f2c)");
+            throw new ArgumentException("Unknown move kind: " + token + " (try: t2t, t2c, c2t, t2f, c2f)");
         }
 
         struct ScoredMove { public Move move; public int score; public string reason; }
@@ -463,8 +556,10 @@ namespace Solitaire.Cli
             Console.WriteLine("  fc-new --seed <u32>          Start a new FreeCell game");
             Console.WriteLine("  fc-legal                     List legal moves");
             Console.WriteLine("  fc-move <Kind> <from> <to> [count]");
-            Console.WriteLine("    Kind aliases: t2t, t2c, c2t, t2f, c2f, f2t, f2c");
-            Console.WriteLine("  save <path.json> [--note \"text\"] [--tag a,b,c]  Save current game as replay JSON");
+            Console.WriteLine("    Kind aliases: t2t, t2c, c2t, t2f, c2f");
+            Console.WriteLine("  fc-f2t <fIdx> <tIdx>         Move from Foundation(fIdx) back to Tableau(tIdx) via rewind+branch");
+            Console.WriteLine("  fc-f2c <fIdx> <cIdx>         Move from Foundation(fIdx) back to Cell(cIdx) via rewind+branch");
+            Console.WriteLine("  save <path.json> [--note "text"] [--tag a,b,c]  Save current game as replay JSON");
             Console.WriteLine("  replay <path.json> [--until N]  Replay file (apply first N moves)");
             Console.WriteLine("  load <path.json>             Load file and set current state to result");
             Console.WriteLine("  replay-info <path.json>      Show metadata/config/move count");
@@ -630,13 +725,13 @@ namespace Solitaire.Cli
                 while (i < commandLine.Length && char.IsWhiteSpace(commandLine[i])) i++;
                 if (i >= commandLine.Length) yield break;
 
-                if (commandLine[i] == '\"')
+                if (commandLine[i] == '"')
                 {
                     i++;
                     int start = i;
-                    while (i < commandLine.Length && commandLine[i] != '\"') i++;
+                    while (i < commandLine.Length && commandLine[i] != '"') i++;
                     yield return commandLine.Substring(start, i - start);
-                    if (i < commandLine.Length && commandLine[i] == '\"') i++;
+                    if (i < commandLine.Length && commandLine[i] == '"') i++;
                 }
                 else
                 {
