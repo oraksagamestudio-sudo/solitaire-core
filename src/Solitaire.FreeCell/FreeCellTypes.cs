@@ -1,52 +1,36 @@
-using Solitaire.Core;
+using System;
 
 namespace Solitaire.FreeCell
 {
     public enum MoveKind
     {
-        TableauToCell,
-        CellToTableau,
-        TableauToFoundation,
-        CellToFoundation,
-        TableauToTableau,
-        FoundationToTableau,   // 추가
-        FoundationToCell       // 추가
+        TableauToTableau = 1,
+        TableauToCell = 2,
+        CellToTableau = 3,
+        TableauToFoundation = 4,
+        CellToFoundation = 5,
+        FoundationToTableau = 6, // NEW
+        FoundationToCell = 7     // NEW
     }
 
-    public readonly struct Index
+    public struct Move
     {
-        public int Value { get; }
-        public Index(int v) { Value = v; }
-        public override string ToString() => Value.ToString();
-    }
+        public MoveKind Kind;
+        public int From;
+        public int To;
+        public int Count;
 
-    public readonly struct Move
-    {
-        public MoveKind Kind { get; }
-        public int From { get; }
-        public int To { get; }
-        /// <summary>For TableauToTableau sequences; Phase 2 uses 1.</summary>
-        public int Count { get; }
-
-        public Move(MoveKind kind, int from, int to, int count = 1)
+        public Move(MoveKind kind, int from, int to, int count)
         {
-            Kind = kind; From = from; To = to; Count = count;
+            this.Kind = kind;
+            this.From = from;
+            this.To = to;
+            this.Count = count;
         }
-        public override string ToString() => $"{Kind} {From}->{To} x{Count}";
-    }
 
-    internal static class SuitIndex
-    {
-        public static int ToIndex(Suit s)
+        public override string ToString()
         {
-            switch (s)
-            {
-                case Suit.Spade: return 0;
-                case Suit.Heart: return 1;
-                case Suit.Diamond: return 2;
-                case Suit.Club: return 3;
-                default: return 0;
-            }
+            return Kind.ToString() + " " + From + "->" + To + " x" + Count;
         }
     }
 }

@@ -141,7 +141,7 @@ namespace Solitaire.Cli
                 case "save":
                 {
                     EnsureFc();
-                    if (args.Count < 2) { Console.WriteLine("Usage: save <path.json> [--note "text"] [--tag a,b,c]"); return; }
+                    if (args.Count < 2) { Console.WriteLine("Usage: save <path.json> [--note \"text\"] [--tag a,b,c]"); return; }
                     var path = args[1];
 
                     string note = "";
@@ -559,7 +559,7 @@ namespace Solitaire.Cli
             Console.WriteLine("    Kind aliases: t2t, t2c, c2t, t2f, c2f");
             Console.WriteLine("  fc-f2t <fIdx> <tIdx>         Move from Foundation(fIdx) back to Tableau(tIdx) via rewind+branch");
             Console.WriteLine("  fc-f2c <fIdx> <cIdx>         Move from Foundation(fIdx) back to Cell(cIdx) via rewind+branch");
-            Console.WriteLine("  save <path.json> [--note "text"] [--tag a,b,c]  Save current game as replay JSON");
+            Console.WriteLine("  save <path.json> [--note \"text\"] [--tag a,b,c]  Save current game as replay JSON");
             Console.WriteLine("  replay <path.json> [--until N]  Replay file (apply first N moves)");
             Console.WriteLine("  load <path.json>             Load file and set current state to result");
             Console.WriteLine("  replay-info <path.json>      Show metadata/config/move count");
@@ -725,13 +725,13 @@ namespace Solitaire.Cli
                 while (i < commandLine.Length && char.IsWhiteSpace(commandLine[i])) i++;
                 if (i >= commandLine.Length) yield break;
 
-                if (commandLine[i] == '"')
+                if (commandLine[i] == '\"')
                 {
                     i++;
                     int start = i;
-                    while (i < commandLine.Length && commandLine[i] != '"') i++;
+                    while (i < commandLine.Length && commandLine[i] != '\"') i++;
                     yield return commandLine.Substring(start, i - start);
-                    if (i < commandLine.Length && commandLine[i] == '"') i++;
+                    if (i < commandLine.Length && commandLine[i] == '\"') i++;
                 }
                 else
                 {

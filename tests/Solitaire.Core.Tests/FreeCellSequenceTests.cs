@@ -13,7 +13,7 @@ namespace Solitaire.Core.Tests
         [Fact]
         public void Sequence_MaxMovable_Respects_Buffer_When_Dest_Not_Empty()
         {
-            var s = FreeCellState.NewGame(1);
+            var s = FreeCellState.NewGame(1, new FreeCellConfig());
             foreach (var t in s.Tableaus) t.Clear();
 
             s.Tableaus[0].AddRange(new [] { C(Suit.Spade, Rank.Eight), C(Suit.Heart, Rank.Seven),
@@ -32,7 +32,7 @@ namespace Solitaire.Core.Tests
         [Fact]
         public void Sequence_Dest_Empty_Consumes_One_Empty_Tableau()
         {
-            var s = FreeCellState.NewGame(1);
+            var s = FreeCellState.NewGame(1, new FreeCellConfig());
             foreach (var t in s.Tableaus) t.Clear();
 
             s.Tableaus[0].AddRange(new [] { C(Suit.Spade, Rank.Eight), C(Suit.Heart, Rank.Seven),
@@ -50,7 +50,7 @@ namespace Solitaire.Core.Tests
         [Fact]
         public void Apply_Sequence_Move_Moves_Slice_Preserving_Order()
         {
-            var s = FreeCellState.NewGame(1);
+            var s = FreeCellState.NewGame(1, new FreeCellConfig());
             foreach (var t in s.Tableaus) t.Clear();
 
             s.Tableaus[0].AddRange(new [] { C(Suit.Spade, Rank.Eight), C(Suit.Heart, Rank.Seven),

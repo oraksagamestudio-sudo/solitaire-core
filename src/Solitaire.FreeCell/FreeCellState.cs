@@ -1,359 +1,291 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Solitaire.Core;
 
 namespace Solitaire.FreeCell
 {
-    public sealed class FreeCellState : IGameState<Move>
+    public sealed class FreeCellState
     {
-        public FreeCellConfig Config { get; }
-        public uint Seed { get; }
-        public int MoveCount { get; private set; }
+        public readonly List<Card>[] Tableaus;
+        public readonly Card?[] Cells;
+        public readonly int[] FoundationTop; // 0=Spade,1=Heart,2=Diamond,3=Club ; value: highest rank (0 if empty)
+        public readonly int MoveCount;
+        public readonly FreeCellConfig Config;
+        private readonly uint Seed;
 
-        public Card?[] Cells { get; }
-        public List<Card>[] Tableaus { get; }
-        public int[] FoundationTop { get; }
-
-        public bool IsVictory => FoundationTop.Sum() == 52;
-        public bool IsStalemate => !IsVictory && !GetLegalMoves().Any();
-
-        private FreeCellState(FreeCellConfig cfg, uint seed, int moveCount,
-                              Card?[] cells, List<Card>[] tableaus, int[] foundationTop)
+        private FreeCellState(uint seed, FreeCellConfig cfg, List<Card>[] t, Card?[] cells, int[] ftop, int moves)
         {
-            Config = cfg;
-            Seed = seed;
-            MoveCount = moveCount;
-            Cells = cells;
-            Tableaus = tableaus;
-            FoundationTop = foundationTop;
+            this.Seed = seed;
+            this.Config = cfg;
+            this.Tableaus = t;
+            this.Cells = cells;
+            this.FoundationTop = ftop;
+            this.MoveCount = moves;
         }
 
-        public static FreeCellState NewGame(uint seed, FreeCellConfig cfg = null)
+        public static FreeCellState NewGame(uint seed, FreeCellConfig cfg)
         {
-            var config = cfg ?? FreeCellConfig.Default;
-            var deck = DeckUtils.CreateStandard52(faceUp: true);
-            var rng = new XorShift32(seed);
-            DeckUtils.FisherYatesShuffle(deck, rng);
-
-            var tableaus = new List<Card>[config.Tableaus];
-            for (int i = 0; i < tableaus.Length; i++) tableaus[i] = new List<Card>(7);
-            int k = 0;
-            for (int col = 0; col < 8; col++)
+            var deck = MakeShuffledDeck(seed);
+            var t = new List<Card>[cfg.Tableaus];
+            for (int i = 0; i < t.Length; i++) t[i] = new List<Card>();
+            for (int i = 0; i < deck.Count; i++)
             {
-                int count = (col < 4) ? 7 : 6;
-                for (int c = 0; c < count; c++) tableaus[col].Add(deck[k++]);
+                t[i % cfg.Tableaus].Add(deck[i]);
             }
-            var cells = new Card?[config.Cells];
-            var foundationTop = new int[config.Foundations];
+            var cells = new Card?[cfg.Cells];
+            var ftop = new int[4];
+            return new FreeCellState(seed, cfg, t, cells, ftop, 0);
+        }
 
-            return new FreeCellState(config, seed, 0, cells, tableaus, foundationTop);
+        // Local deterministic shuffle to avoid DeckUtils dependency
+        private static List<Card> MakeShuffledDeck(uint seed)
+        {
+            var deck = new List<Card>(52);
+            Suit[] suits = new[] { Suit.Spade, Suit.Heart, Suit.Diamond, Suit.Club };
+            for (int si = 0; si < suits.Length; si++)
+            {
+                for (int r = 1; r <= 13; r++)
+                {
+                    deck.Add(new Card(suits[si], (Rank)r));
+                }
+            }
+            var rnd = new Random(unchecked((int)seed));
+            for (int i = deck.Count - 1; i > 0; i--)
+            {
+                int j = rnd.Next(i + 1);
+                var tmp = deck[i];
+                deck[i] = deck[j];
+                deck[j] = tmp;
+            }
+            return deck;
+        }
+
+        // --- Compatibility shim: read AllowFoundationDownMoves via reflection (default: true) ---
+        private static bool AllowDown(FreeCellConfig cfg)
+        {
+            if (cfg == null) return true;
+            var prop = cfg.GetType().GetProperty("AllowFoundationDownMoves", BindingFlags.Public | BindingFlags.Instance);
+            if (prop != null && prop.PropertyType == typeof(bool))
+            {
+                var val = prop.GetValue(cfg);
+                if (val is bool b) return b;
+            }
+            return true; // default permissive if property doesn't exist
         }
 
         public IEnumerable<Move> GetLegalMoves()
         {
-            int emptyCells = 0;
-            for (int c = 0; c < Cells.Length; c++) if (!Cells[c].HasValue) emptyCells++;
-            int emptyTabs = 0;
-            for (int t = 0; t < Tableaus.Length; t++) if (Tableaus[t].Count == 0) emptyTabs++;
-
             for (int i = 0; i < Tableaus.Length; i++)
             {
-                if (Tableaus[i].Count == 0) continue;
-                var srcList = Tableaus[i];
-                var top = srcList[srcList.Count - 1];
-
-                if (CanPlaceOnFoundation(top))
-                    yield return new Move(MoveKind.TableauToFoundation, i, SuitIndex.ToIndex(top.Suit), 1);
-
-                for (int c = 0; c < Cells.Length; c++)
-                    if (!Cells[c].HasValue)
-                        yield return new Move(MoveKind.TableauToCell, i, c, 1);
-
-                for (int j = 0; j < Tableaus.Length; j++)
-                    if (j != i && CanPlaceOnTableau(top, j))
-                        yield return new Move(MoveKind.TableauToTableau, i, j, 1);
-
-                if (Config.AllowSequenceMoves)
+                if (Tableaus[i].Count > 0)
                 {
-                    int run = TailRunLength(srcList);
-                    if (run > 1)
-                    {
-                        for (int j = 0; j < Tableaus.Length; j++)
-                        {
-                            if (j == i) continue;
-                            bool destEmpty = Tableaus[j].Count == 0;
-                            int maxByBuffer = ComputeMaxMovable(emptyCells, emptyTabs, destEmpty);
-                            int maxLen = Math.Min(run, maxByBuffer);
-                            if (maxLen <= 1) continue;
+                    var top = Tableaus[i][Tableaus[i].Count - 1];
+                    if (CanMoveToFoundation(top)) yield return new Move(MoveKind.TableauToFoundation, i, SuitIndex(top.Suit), 1);
 
-                            for (int count = 2; count <= maxLen; count++)
-                            {
-                                var bottom = srcList[srcList.Count - count];
-                                if (CanPlaceOnTableauBottom(bottom, j))
-                                    yield return new Move(MoveKind.TableauToTableau, i, j, count);
-                            }
-                        }
+                    for (int c = 0; c < Cells.Length; c++)
+                        if (!Cells[c].HasValue) yield return new Move(MoveKind.TableauToCell, i, c, 1);
+
+                    for (int j = 0; j < Tableaus.Length; j++)
+                    {
+                        if (i == j) continue;
+                        if (CanPlaceOnTableau(Tableaus[j], top)) yield return new Move(MoveKind.TableauToTableau, i, j, 1);
                     }
                 }
             }
 
             for (int c = 0; c < Cells.Length; c++)
             {
-                if (!Cells[c].HasValue) continue;
-                var card = Cells[c].Value;
+                if (Cells[c].HasValue)
+                {
+                    var card = Cells[c].Value;
+                    if (CanMoveToFoundation(card)) yield return new Move(MoveKind.CellToFoundation, c, SuitIndex(card.Suit), 1);
+                    for (int j = 0; j < Tableaus.Length; j++)
+                    {
+                        if (CanPlaceOnTableau(Tableaus[j], card)) yield return new Move(MoveKind.CellToTableau, c, j, 1);
+                    }
+                }
+            }
 
-                if (CanPlaceOnFoundation(card))
-                    yield return new Move(MoveKind.CellToFoundation, c, SuitIndex.ToIndex(card.Suit), 1);
-
-                for (int j = 0; j < Tableaus.Length; j++)
-                    if (CanPlaceOnTableau(card, j))
-                        yield return new Move(MoveKind.CellToTableau, c, j, 1);
-
-                // === Reverse from Foundation ===
+            if (AllowDown(Config))
+            {
                 for (int f = 0; f < 4; f++)
                 {
-                    int topRank = this.FoundationTop[f];
-                    if (topRank <= 0) continue;
-                    var fromCard = new Card((Suit)f, (Rank)topRank);
+                    int r = FoundationTop[f];
+                    if (r <= 0) continue;
+                    var suit = IndexSuit(f);
+                    var moving = new Card(suit, (Rank)r);
 
-                    // to tableau
-                    for (int t = 0; t < this.Tableaus.Length; t++)
-                    {
-                        var pile = this.Tableaus[t];
-                        bool ok;
-                        if (pile.Count == 0) ok = true; // FreeCell 규칙: 빈 테이블로는 어떤 카드도 가능
-                        else
-                        {
-                            var dest = pile[pile.Count - 1];
-                            ok = IsOppositeColor(fromCard, dest) && ((int)dest.Rank == (int)fromCard.Rank + 1);
-                        }
-                        if (ok) yield return new Move(MoveKind.FoundationToTableau, f, t, 1);
-                    }
+                    for (int c = 0; c < Cells.Length; c++)
+                        if (!Cells[c].HasValue) yield return new Move(MoveKind.FoundationToCell, f, c, 1);
 
-                    // to cell
-                    for (int c = 0; c < this.Cells.Length; c++)
+                    for (int j = 0; j < Tableaus.Length; j++)
                     {
-                        if (!this.Cells[c].HasValue)
-                        {
-                            yield return new Move(MoveKind.FoundationToCell, f, c, 1);
-                            break;
-                        }
+                        if (CanPlaceOnTableau(Tableaus[j], moving)) yield return new Move(MoveKind.FoundationToTableau, f, j, 1);
                     }
                 }
             }
         }
 
-        public IGameState<Move> Apply(Move move)
+        public FreeCellState Apply(Move m)
         {
+            var t = CloneTableaus();
             var cells = (Card?[])Cells.Clone();
-            var tableaus = Tableaus.Select(list => new List<Card>(list)).ToArray();
             var ftop = (int[])FoundationTop.Clone();
-            int mc = MoveCount + 1;
+            int moves = MoveCount + 1;
 
-            switch (move.Kind)
+            switch (m.Kind)
             {
                 case MoveKind.TableauToCell:
                 {
-                    var src = tableaus[move.From];
-                    if (src.Count == 0) throw new InvalidOperationException("Empty tableau.");
-                    var card = src[src.Count - 1];
-                    if (cells[move.To].HasValue) throw new InvalidOperationException("Cell not empty.");
-                    src.RemoveAt(src.Count - 1);
-                    cells[move.To] = card;
+                    RequireTableauIndex(m.From); RequireCellIndex(m.To);
+                    if (t[m.From].Count == 0) throw new InvalidOperationException("Empty tableau.");
+                    if (cells[m.To].HasValue) throw new InvalidOperationException("Cell not empty.");
+                    var card = t[m.From][t[m.From].Count - 1];
+                    t[m.From].RemoveAt(t[m.From].Count - 1);
+                    cells[m.To] = card;
                     break;
                 }
                 case MoveKind.CellToTableau:
                 {
-                    var card = cells[move.From] ?? throw new InvalidOperationException("Cell empty.");
-                    if (!CanPlaceOnTableau(card, move.To, tableaus))
-                        throw new InvalidOperationException("Illegal move.");
-                    tableaus[move.To].Add(card);
-                    cells[move.From] = null;
-                    break;
-                }
-                case MoveKind.TableauToFoundation:
-                {
-                    var src = tableaus[move.From];
-                    if (src.Count == 0) throw new InvalidOperationException("Empty tableau.");
-                    var card = src[src.Count - 1];
-                    if (!CanPlaceOnFoundation(card, ftop))
-                        throw new InvalidOperationException("Illegal move.");
-                    src.RemoveAt(src.Count - 1);
-                    ftop[SuitIndex.ToIndex(card.Suit)] = (int)card.Rank;
-                    break;
-                }
-                case MoveKind.CellToFoundation:
-                {
-                    var card = cells[move.From] ?? throw new InvalidOperationException("Cell empty.");
-                    if (!CanPlaceOnFoundation(card, ftop))
-                        throw new InvalidOperationException("Illegal move.");
-                    cells[move.From] = null;
-                    ftop[SuitIndex.ToIndex(card.Suit)] = (int)card.Rank;
+                    RequireCellIndex(m.From); RequireTableauIndex(m.To);
+                    if (!cells[m.From].HasValue) throw new InvalidOperationException("Cell empty.");
+                    var card = cells[m.From].Value;
+                    if (!CanPlaceOnTableau(t[m.To], card)) throw new InvalidOperationException("Illegal placement.");
+                    cells[m.From] = null;
+                    t[m.To].Add(card);
                     break;
                 }
                 case MoveKind.TableauToTableau:
                 {
-                    var src = tableaus[move.From];
-                    if (src.Count == 0) throw new InvalidOperationException("Empty tableau.");
-                    int count = move.Count;
-                    if (count < 1) throw new InvalidOperationException("Count must be >= 1.");
-                    if (count == 1)
-                    {
-                        var one = src[src.Count - 1];
-                        if (!CanPlaceOnTableau(one, move.To, tableaus))
-                            throw new InvalidOperationException("Illegal move.");
-                        src.RemoveAt(src.Count - 1);
-                        tableaus[move.To].Add(one);
-                    }
-                    else
-                    {
-                        if (!Config.AllowSequenceMoves) throw new InvalidOperationException("Sequence moves disabled.");
-                        if (src.Count < count) throw new InvalidOperationException("Source has fewer cards than requested.");
-                        if (!IsProperTailRun(src, count)) throw new InvalidOperationException("Slice is not a proper sequence.");
-                        var bottom = src[src.Count - count];
-
-                        int emptyCells = 0;
-                        for (int c = 0; c < cells.Length; c++) if (!cells[c].HasValue) emptyCells++;
-                        int emptyTabs = 0;
-                        for (int t = 0; t < tableaus.Length; t++) if (tableaus[t].Count == 0) emptyTabs++;
-                        bool destEmpty = tableaus[move.To].Count == 0;
-                        int maxByBuffer = ComputeMaxMovable(emptyCells, emptyTabs, destEmpty);
-                        if (count > maxByBuffer) throw new InvalidOperationException("Exceeds movable sequence size.");
-
-                        if (!CanPlaceOnTableauBottom(bottom, move.To, tableaus))
-                            throw new InvalidOperationException("Illegal destination for sequence.");
-
-                        var dst = tableaus[move.To];
-                        for (int k = src.Count - count; k < src.Count; k++) dst.Add(src[k]);
-                        src.RemoveRange(src.Count - count, count);
-                    }
+                    RequireTableauIndex(m.From); RequireTableauIndex(m.To);
+                    if (t[m.From].Count == 0) throw new InvalidOperationException("Empty tableau.");
+                    int cnt = Math.Max(1, m.Count);
+                    if (cnt > t[m.From].Count) throw new InvalidOperationException("Not enough cards.");
+                    if (cnt != 1) throw new InvalidOperationException("Only single card moves supported here.");
+                    var card = t[m.From][t[m.From].Count - 1];
+                    if (!CanPlaceOnTableau(t[m.To], card)) throw new InvalidOperationException("Illegal placement.");
+                    t[m.From].RemoveAt(t[m.From].Count - 1);
+                    t[m.To].Add(card);
+                    break;
+                }
+                case MoveKind.TableauToFoundation:
+                {
+                    RequireTableauIndex(m.From); RequireFoundationIndex(m.To);
+                    if (t[m.From].Count == 0) throw new InvalidOperationException("Empty tableau.");
+                    var card = t[m.From][t[m.From].Count - 1];
+                    if (SuitIndex(card.Suit) != m.To) throw new InvalidOperationException("Wrong foundation.");
+                    if (!CanMoveToFoundation(card)) throw new InvalidOperationException("Illegal to foundation.");
+                    t[m.From].RemoveAt(t[m.From].Count - 1);
+                    ftop[m.To] = (int)card.Rank;
+                    break;
+                }
+                case MoveKind.CellToFoundation:
+                {
+                    RequireCellIndex(m.From); RequireFoundationIndex(m.To);
+                    if (!cells[m.From].HasValue) throw new InvalidOperationException("Cell empty.");
+                    var card = cells[m.From].Value;
+                    if (SuitIndex(card.Suit) != m.To) throw new InvalidOperationException("Wrong foundation.");
+                    if (!CanMoveToFoundation(card)) throw new InvalidOperationException("Illegal to foundation.");
+                    cells[m.From] = null;
+                    ftop[m.To] = (int)card.Rank;
                     break;
                 }
                 case MoveKind.FoundationToTableau:
                 {
-                    if (m.Count != 1) throw new InvalidOperationException("Foundation->Tableau supports count=1.");
-                    if (m.From < 0 || m.From >= 4) throw new ArgumentOutOfRangeException("From");
-                    if (m.To < 0 || m.To >= this.Tableaus.Length) throw new ArgumentOutOfRangeException("To");
-                    int top = this.FoundationTop[m.From];
-                    if (top <= 0) throw new InvalidOperationException("Source foundation empty.");
-
-                    var card = new Card((Suit)m.From, (Rank)top);
-                    var dst = new List<Card>(this.Tableaus[m.To]);
-                    if (dst.Count != 0)
-                    {
-                        var destTop = dst[dst.Count - 1];
-                        if (!(IsOppositeColor(card, destTop) && ((int)destTop.Rank == (int)card.Rank + 1)))
-                            throw new InvalidOperationException("Illegal Foundation->Tableau move.");
-                    }
-
-                    var newTabs = (List<Card>[])this.Tableaus.Clone();
-                    dst.Add(card);
-                    newTabs[m.To] = dst;
-
-                    var newFound = (int[])this.FoundationTop.Clone();
-                    newFound[m.From] = top - 1;
-
-                    return new FreeCellState(newTabs, (Card?[])this.Cells.Clone(), newFound, this.MoveCount + 1, this.Config);
+                    RequireFoundationIndex(m.From); RequireTableauIndex(m.To);
+                    if (!AllowDown(Config)) throw new InvalidOperationException("Foundation down moves disabled.");
+                    int r = ftop[m.From];
+                    if (r <= 0) throw new InvalidOperationException("Foundation empty.");
+                    var card = new Card(IndexSuit(m.From), (Rank)r);
+                    if (!CanPlaceOnTableau(t[m.To], card)) throw new InvalidOperationException("Illegal placement.");
+                    ftop[m.From] = r - 1;
+                    t[m.To].Add(card);
+                    break;
                 }
                 case MoveKind.FoundationToCell:
                 {
-                    if (m.Count != 1) throw new InvalidOperationException("Foundation->Cell supports count=1.");
-                    if (m.From < 0 || m.From >= 4) throw new ArgumentOutOfRangeException("From");
-                    if (m.To < 0 || m.To >= this.Cells.Length) throw new ArgumentOutOfRangeException("To");
-                    int top = this.FoundationTop[m.From];
-                    if (top <= 0) throw new InvalidOperationException("Source foundation empty.");
-                    if (this.Cells[m.To].HasValue) throw new InvalidOperationException("Target cell not empty.");
-
-                    var newCells = (Card?[])this.Cells.Clone();
-                    newCells[m.To] = new Card((Suit)m.From, (Rank)top);
-
-                    var newFound = (int[])this.FoundationTop.Clone();
-                    newFound[m.From] = top - 1;
-
-                    return new FreeCellState((List<Card>[])this.Tableaus.Clone(), newCells, newFound, this.MoveCount + 1, this.Config);
+                    RequireFoundationIndex(m.From); RequireCellIndex(m.To);
+                    if (!AllowDown(Config)) throw new InvalidOperationException("Foundation down moves disabled.");
+                    int r = ftop[m.From];
+                    if (r <= 0) throw new InvalidOperationException("Foundation empty.");
+                    if (cells[m.To].HasValue) throw new InvalidOperationException("Cell not empty.");
+                    var card = new Card(IndexSuit(m.From), (Rank)r);
+                    ftop[m.From] = r - 1;
+                    cells[m.To] = card;
+                    break;
                 }
-
-                default: throw new NotSupportedException();
+                default:
+                    throw new NotSupportedException("Unknown move kind: " + m.Kind);
             }
 
-            return new FreeCellState(Config, Seed, mc, cells, tableaus, ftop);
+            return new FreeCellState(Seed, Config, t, cells, ftop, moves);
         }
 
-        private static int TailRunLength(List<Card> pile)
+        private List<Card>[] CloneTableaus()
         {
-            int n = pile.Count;
-            if (n == 0) return 0;
-            int count = 1;
-            for (int i = n - 1; i - 1 >= 0; i--)
+            var t = new List<Card>[Tableaus.Length];
+            for (int i = 0; i < t.Length; i++) t[i] = new List<Card>(Tableaus[i]);
+            return t;
+        }
+
+        private static bool CanPlaceOnTableau(List<Card> dest, Card card)
+        {
+            if (dest.Count == 0) return true; // FreeCell: any card allowed on empty column
+            var top = dest[dest.Count - 1];
+            bool altColor = IsRed(top.Suit) != IsRed(card.Suit);
+            bool rankOK = ((int)top.Rank) == ((int)card.Rank) + 1;
+            return altColor && rankOK;
+        }
+
+        private bool CanMoveToFoundation(Card card)
+        {
+            int idx = SuitIndex(card.Suit);
+            int expected = FoundationTop[idx] + 1;
+            return (int)card.Rank == expected;
+        }
+
+        private static bool IsRed(Suit s)
+        {
+            return s == Suit.Heart || s == Suit.Diamond;
+        }
+
+        private static int SuitIndex(Suit s)
+        {
+            switch (s)
             {
-                var a = pile[i];
-                var b = pile[i - 1];
-                bool colorsAlt = (a.Color != b.Color);
-                bool rankDesc = ((int)a.Rank == (int)b.Rank - 1);
-                if (colorsAlt && rankDesc) count++;
-                else break;
+                case Suit.Spade: return 0;
+                case Suit.Heart: return 1;
+                case Suit.Diamond: return 2;
+                case Suit.Club: return 3;
             }
-            return count;
+            return 0;
         }
 
-        private static bool IsProperTailRun(List<Card> pile, int count)
+        private static Suit IndexSuit(int idx)
         {
-            if (count <= 0 || pile.Count < count) return false;
-            int n = pile.Count;
-            for (int i = n - count + 1; i < n; i++)
+            switch (idx)
             {
-                var a = pile[i];
-                var b = pile[i - 1];
-                bool colorsAlt = (a.Color != b.Color);
-                bool rankDesc = ((int)a.Rank == (int)b.Rank - 1);
-                if (!(colorsAlt && rankDesc)) return false;
+                case 0: return Suit.Spade;
+                case 1: return Suit.Heart;
+                case 2: return Suit.Diamond;
+                case 3: return Suit.Club;
             }
-            return true;
+            return Suit.Spade;
         }
 
-        private bool CanPlaceOnFoundation(Card card) => CanPlaceOnFoundation(card, FoundationTop);
-        private static bool CanPlaceOnFoundation(Card card, int[] top)
+        private void RequireTableauIndex(int i)
         {
-            int idx = SuitIndex.ToIndex(card.Suit);
-            return (int)card.Rank == top[idx] + 1;
+            if (i < 0 || i >= Tableaus.Length) throw new ArgumentOutOfRangeException("tableau");
         }
-
-        private bool CanPlaceOnTableau(Card card, int to) => CanPlaceOnTableau(card, to, Tableaus);
-        private static bool CanPlaceOnTableau(Card card, int to, List<Card>[] tableaus)
+        private void RequireCellIndex(int i)
         {
-            var dst = tableaus[to];
-            if (dst.Count == 0) return true;
-            var target = dst[dst.Count - 1];
-            bool colorsAlt = (card.Color != target.Color);
-            bool rankIsOneLower = ((int)card.Rank == (int)target.Rank - 1);
-            return colorsAlt && rankIsOneLower;
+            if (i < 0 || i >= Cells.Length) throw new ArgumentOutOfRangeException("cell");
         }
-
-        private bool CanPlaceOnTableauBottom(Card bottom, int to) => CanPlaceOnTableauBottom(bottom, to, Tableaus);
-        private static bool CanPlaceOnTableauBottom(Card bottom, int to, List<Card>[] tableaus)
+        private void RequireFoundationIndex(int i)
         {
-            var dst = tableaus[to];
-            if (dst.Count == 0) return true;
-            var target = dst[dst.Count - 1];
-            bool colorsAlt = (bottom.Color != target.Color);
-            bool rankIsOneLower = ((int)bottom.Rank == (int)target.Rank - 1);
-            return colorsAlt && rankIsOneLower;
+            if (i < 0 || i >= 4) throw new ArgumentOutOfRangeException("foundation");
         }
-
-        private static int ComputeMaxMovable(int emptyCells, int emptyTableaus, bool destEmpty)
-        {
-            int k = emptyTableaus;
-            if (destEmpty) k = Math.Max(0, k - 1);
-            long max = (long)(emptyCells + 1);
-            for (int i = 0; i < k; i++) max *= 2;
-            if (max < 1) max = 1;
-            if (max > 52) max = 52;
-            return (int)max;
-        }
-
-        static bool IsRed(Suit s) { return s == Suit.Heart || s == Suit.Diamond; }
-        static bool IsOppositeColor(Card a, Card b) { return IsRed(a.Suit) != IsRed(b.Suit); }
-
     }
 }
