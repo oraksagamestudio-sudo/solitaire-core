@@ -1,3 +1,4 @@
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,63 +7,76 @@ using Solitaire.Core;
 
 namespace Solitaire.FreeCell
 {
+    /// <summary>
+    /// FreeCell core state:
+    /// - Shuffle: DeckUtils.CreateStandard52 + DeckUtils.FisherYatesShuffle(XorShift32)  ← replays compatible
+    /// - Multi-card Tableau-to-Tableau sequence moves (buffer-aware, emits maximal xN)
+    /// - Apply() supports m.Count > 1 (order preserved)
+    /// - AllowFoundationDownMoves via reflection (default: true if property missing)
+    /// </summary>
     public sealed class FreeCellState
     {
         public readonly List<Card>[] Tableaus;
         public readonly Card?[] Cells;
-        public readonly int[] FoundationTop; // 0=Spade,1=Heart,2=Diamond,3=Club ; value: highest rank (0 if empty)
+        /// <summary>0=Spade,1=Heart,2=Diamond,3=Club ; value: highest rank (0 if empty)</summary>
+        public readonly int[] FoundationTop;
         public readonly int MoveCount;
         public readonly FreeCellConfig Config;
         private readonly uint Seed;
 
         private FreeCellState(uint seed, FreeCellConfig cfg, List<Card>[] t, Card?[] cells, int[] ftop, int moves)
         {
-            this.Seed = seed;
-            this.Config = cfg;
-            this.Tableaus = t;
-            this.Cells = cells;
-            this.FoundationTop = ftop;
-            this.MoveCount = moves;
+            Seed = seed;
+            Config = cfg;
+            Tableaus = t;
+            Cells = cells;
+            FoundationTop = ftop;
+            MoveCount = moves;
         }
 
         public static FreeCellState NewGame(uint seed, FreeCellConfig cfg)
         {
-            var deck = MakeShuffledDeck(seed);
+            if (cfg == null) cfg = new FreeCellConfig();
+
+            // Restore original shuffle to match recorded replays
+            var deck = DeckUtils.CreateStandard52(faceUp: true);
+            var rng = new XorShift32(seed);
+            DeckUtils.FisherYatesShuffle(deck, rng);
+
             var t = new List<Card>[cfg.Tableaus];
             for (int i = 0; i < t.Length; i++) t[i] = new List<Card>();
-            for (int i = 0; i < deck.Count; i++)
-            {
-                t[i % cfg.Tableaus].Add(deck[i]);
-            }
+            for (int i = 0; i < deck.Count; i++) t[i % cfg.Tableaus].Add(deck[i]);
+
             var cells = new Card?[cfg.Cells];
             var ftop = new int[4];
             return new FreeCellState(seed, cfg, t, cells, ftop, 0);
         }
 
-        // Local deterministic shuffle to avoid DeckUtils dependency
-        private static List<Card> MakeShuffledDeck(uint seed)
+        public static FreeCellState NewGame(uint seed, FreeCellConfig cfg, string shuffleKind)
         {
-            var deck = new List<Card>(52);
-            Suit[] suits = new[] { Suit.Spade, Suit.Heart, Suit.Diamond, Suit.Club };
-            for (int si = 0; si < suits.Length; si++)
-            {
-                for (int r = 1; r <= 13; r++)
-                {
-                    deck.Add(new Card(suits[si], (Rank)r));
-                }
-            }
-            var rnd = new Random(unchecked((int)seed));
-            for (int i = deck.Count - 1; i > 0; i--)
-            {
-                int j = rnd.Next(i + 1);
-                var tmp = deck[i];
-                deck[i] = deck[j];
-                deck[j] = tmp;
-            }
-            return deck;
+            if (cfg == null) cfg = new FreeCellConfig();
+
+            var deck = DeckUtils.CreateStandard52(faceUp: true);
+            Solitaire.Core.IRng rng;
+            if (!string.IsNullOrEmpty(shuffleKind) && shuffleKind.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+                rng = new Solitaire.Core.DotNetRandom((int)seed);
+            else
+                rng = new Solitaire.Core.XorShift32(seed);
+
+            DeckUtils.FisherYatesShuffle(deck, rng);
+
+            var t = new List<Card>[cfg.Tableaus];
+            for (int i = 0; i < t.Length; i++) t[i] = new List<Card>();
+            for (int i = 0; i < deck.Count; i++) t[i % cfg.Tableaus].Add(deck[i]);
+
+            var cells = new Card?[cfg.Cells];
+            var ftop = new int[cfg.Foundations]; // all 0 (empty)
+            return new FreeCellState(seed, cfg, t, cells, ftop, 0);
         }
 
-        // --- Compatibility shim: read AllowFoundationDownMoves via reflection (default: true) ---
+
+
+        // Reflection shim for optional config switch
         private static bool AllowDown(FreeCellConfig cfg)
         {
             if (cfg == null) return true;
@@ -72,42 +86,47 @@ namespace Solitaire.FreeCell
                 var val = prop.GetValue(cfg);
                 if (val is bool b) return b;
             }
-            return true; // default permissive if property doesn't exist
+            return true;
         }
 
         public IEnumerable<Move> GetLegalMoves()
         {
-            for (int i = 0; i < Tableaus.Length; i++)
+            // Tableau -> Foundation / Cell / Tableau
+            for (int src = 0; src < Tableaus.Length; src++)
             {
-                if (Tableaus[i].Count > 0)
+                var sList = Tableaus[src];
+                if (sList.Count > 0)
                 {
-                    var top = Tableaus[i][Tableaus[i].Count - 1];
-                    if (CanMoveToFoundation(top)) yield return new Move(MoveKind.TableauToFoundation, i, SuitIndex(top.Suit), 1);
+                    var top = sList[sList.Count - 1];
+                    if (CanMoveToFoundation(top)) yield return new Move(MoveKind.TableauToFoundation, src, SuitIndex(top.Suit), 1);
 
                     for (int c = 0; c < Cells.Length; c++)
-                        if (!Cells[c].HasValue) yield return new Move(MoveKind.TableauToCell, i, c, 1);
+                        if (!Cells[c].HasValue) yield return new Move(MoveKind.TableauToCell, src, c, 1);
 
-                    for (int j = 0; j < Tableaus.Length; j++)
+                    // Multi-card sequence moves: emit maximal count per (src,dst)
+                    for (int dst = 0; dst < Tableaus.Length; dst++)
                     {
-                        if (i == j) continue;
-                        if (CanPlaceOnTableau(Tableaus[j], top)) yield return new Move(MoveKind.TableauToTableau, i, j, 1);
+                        if (src == dst) continue;
+                        int maxSeq = MaxMovableSequenceCount(src, dst);
+                        if (maxSeq > 0)
+                            yield return new Move(MoveKind.TableauToTableau, src, dst, maxSeq);
                     }
                 }
             }
 
+            // Cell -> Foundation / Tableau
             for (int c = 0; c < Cells.Length; c++)
             {
                 if (Cells[c].HasValue)
                 {
                     var card = Cells[c].Value;
                     if (CanMoveToFoundation(card)) yield return new Move(MoveKind.CellToFoundation, c, SuitIndex(card.Suit), 1);
-                    for (int j = 0; j < Tableaus.Length; j++)
-                    {
-                        if (CanPlaceOnTableau(Tableaus[j], card)) yield return new Move(MoveKind.CellToTableau, c, j, 1);
-                    }
+                    for (int dst = 0; dst < Tableaus.Length; dst++)
+                        if (CanPlaceOnTableau(Tableaus[dst], card)) yield return new Move(MoveKind.CellToTableau, c, dst, 1);
                 }
             }
 
+            // Foundation -> (optional down moves)
             if (AllowDown(Config))
             {
                 for (int f = 0; f < 4; f++)
@@ -120,10 +139,8 @@ namespace Solitaire.FreeCell
                     for (int c = 0; c < Cells.Length; c++)
                         if (!Cells[c].HasValue) yield return new Move(MoveKind.FoundationToCell, f, c, 1);
 
-                    for (int j = 0; j < Tableaus.Length; j++)
-                    {
-                        if (CanPlaceOnTableau(Tableaus[j], moving)) yield return new Move(MoveKind.FoundationToTableau, f, j, 1);
-                    }
+                    for (int dst = 0; dst < Tableaus.Length; dst++)
+                        if (CanPlaceOnTableau(Tableaus[dst], moving)) yield return new Move(MoveKind.FoundationToTableau, f, dst, 1);
                 }
             }
         }
@@ -163,11 +180,29 @@ namespace Solitaire.FreeCell
                     if (t[m.From].Count == 0) throw new InvalidOperationException("Empty tableau.");
                     int cnt = Math.Max(1, m.Count);
                     if (cnt > t[m.From].Count) throw new InvalidOperationException("Not enough cards.");
-                    if (cnt != 1) throw new InvalidOperationException("Only single card moves supported here.");
-                    var card = t[m.From][t[m.From].Count - 1];
-                    if (!CanPlaceOnTableau(t[m.To], card)) throw new InvalidOperationException("Illegal placement.");
-                    t[m.From].RemoveAt(t[m.From].Count - 1);
-                    t[m.To].Add(card);
+
+                    int start = t[m.From].Count - cnt;
+                    // Validate the slice forms a proper alternating descending sequence
+                    for (int i = start + 1; i < t[m.From].Count; i++)
+                    {
+                        if (!FormsSequence(t[m.From][i - 1], t[m.From][i]))
+                            throw new InvalidOperationException("Sequence broken within slice.");
+                    }
+                    // Validate destination placement using the bottom of the slice
+                    var bottom = t[m.From][start];
+                    if (!CanPlaceOnTableau(t[m.To], bottom))
+                        throw new InvalidOperationException("Illegal placement.");
+
+                    // Safety: ensure cnt <= MaxMovableSequenceCount(m.From, m.To)
+                    int maxAllowed = MaxMovableSequenceCount(m.From, m.To);
+                    if (cnt > maxAllowed) throw new InvalidOperationException("Sequence exceeds buffer capacity.");
+
+                    // Move slice preserving order
+                    for (int i = start; i < t[m.From].Count; i++)
+                        t[m.To].Add(t[m.From][i]);
+                    // Remove moved range
+                    for (int i = 0; i < cnt; i++)
+                        t[m.From].RemoveAt(t[m.From].Count - 1);
                     break;
                 }
                 case MoveKind.TableauToFoundation:
@@ -230,9 +265,17 @@ namespace Solitaire.FreeCell
             return t;
         }
 
+        private static bool FormsSequence(Card lower, Card upper)
+        {
+            // 'lower' is beneath 'upper' on a tableau; for a valid sequence: lower rank == upper rank + 1 and alternating colors
+            bool altColor = IsRed(lower.Suit) != IsRed(upper.Suit);
+            bool rankOK = ((int)lower.Rank) == ((int)upper.Rank) + 1;
+            return altColor && rankOK;
+        }
+
         private static bool CanPlaceOnTableau(List<Card> dest, Card card)
         {
-            if (dest.Count == 0) return true; // FreeCell: any card allowed on empty column
+            if (dest.Count == 0) return true; // any card allowed on empty column
             var top = dest[dest.Count - 1];
             bool altColor = IsRed(top.Suit) != IsRed(card.Suit);
             bool rankOK = ((int)top.Rank) == ((int)card.Rank) + 1;
@@ -246,10 +289,7 @@ namespace Solitaire.FreeCell
             return (int)card.Rank == expected;
         }
 
-        private static bool IsRed(Suit s)
-        {
-            return s == Suit.Heart || s == Suit.Diamond;
-        }
+        private static bool IsRed(Suit s) => (s == Suit.Heart) || (s == Suit.Diamond);
 
         private static int SuitIndex(Suit s)
         {
@@ -286,6 +326,54 @@ namespace Solitaire.FreeCell
         private void RequireFoundationIndex(int i)
         {
             if (i < 0 || i >= 4) throw new ArgumentOutOfRangeException("foundation");
+        }
+
+        // === Multi-card sequence helpers ===
+        private int MaxMovableSequenceCount(int src, int dst)
+        {
+            var sList = Tableaus[src];
+            var dList = Tableaus[dst];
+            if (sList.Count == 0) return 0;
+
+            // Longest valid descending alternating run at the tail of src
+            int serial = 1;
+            for (int i = sList.Count - 1; i - 1 >= 0; i--)
+            {
+                if (FormsSequence(sList[i - 1], sList[i])) serial++;
+                else break;
+            }
+
+            // Buffer capacity
+            int freeCells = 0;
+            for (int i = 0; i < Cells.Length; i++) if (!Cells[i].HasValue) freeCells++;
+            int emptyTableaus = 0;
+            for (int i = 0; i < Tableaus.Length; i++) if (Tableaus[i].Count == 0) emptyTableaus++;
+            // Destination empty consumes one empty tableau (cannot be used as staging)
+            bool destEmpty = dList.Count == 0;
+            int usableEmpties = emptyTableaus - (destEmpty ? 1 : 0);
+            if (usableEmpties < 0) usableEmpties = 0;
+            long capacity = (long)(freeCells + 1);
+            for (int k = 0; k < usableEmpties; k++) capacity *= 2L;
+            if (capacity < 1) capacity = 1;
+            int maxByBuffer = (int)Math.Min(int.MaxValue, capacity);
+
+            // If destination not empty, require bottom-of-slice to be placeable
+            if (dList.Count > 0)
+            {
+                int best = 0;
+                int kMax = Math.Min(serial, maxByBuffer);
+                for (int k = kMax; k >= 1; k--)
+                {
+                    var bottom = sList[sList.Count - k];
+                    if (CanPlaceOnTableau(dList, bottom)) { best = k; break; }
+                }
+                return best;
+            }
+            else
+            {
+                // Destination empty: any sequence length up to min(serial, buffer)
+                return Math.Min(serial, maxByBuffer);
+            }
         }
     }
 }

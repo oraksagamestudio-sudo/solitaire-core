@@ -106,7 +106,7 @@ namespace Solitaire.Cli
                     if (args.Count < 4)
                     {
                         Console.WriteLine("Usage: fc-move <Kind> <from> <to> [count]");
-                        Console.WriteLine("  Kind aliases: t2t, t2c, c2t, t2f, c2f");
+                        Console.WriteLine("  Kind aliases: t2t, t2c, c2t, t2f, c2f, f2t, f2c");
                         return;
                     }
                     var kind = ParseMoveKind(args[1]);
@@ -194,6 +194,33 @@ namespace Solitaire.Cli
                     var rf = ReadReplay(path);
                     var cfg = new FreeCellConfig(rf.config.cells, rf.config.foundations, rf.config.tableaus, rf.config.allowSequenceMoves);
                     var s = FreeCellState.NewGame(rf.seed, cfg);
+            string usedShuffle = "xor";
+            if (rf.moves.Count > 0)
+            {
+                var first = rf.moves[0];
+                var m0 = new Move(Enum.Parse<MoveKind>(first.kind, true), first.from, first.to, first.count);
+                try
+                {
+                    // try default
+                    var _ = (FreeCellState)s.Apply(m0);
+                }
+                catch
+                {
+                    // fallback to .NET Random compatible shuffle
+                    var s2 = FreeCellState.NewGame(rf.seed, cfg, "dotnet");
+                    try
+                    {
+                        var __ = (FreeCellState)s2.Apply(m0);
+                        s = s2;
+                        usedShuffle = "dotnet";
+                    }
+                    catch
+                    {
+                        // leave as default; will error below when applying
+                    }
+                }
+            }
+            Console.WriteLine($"[Replay] using shuffle='{usedShuffle}'");
 
                     int applied = 0;
                     for (int i = 0; i < rf.moves.Count && applied < until; i++)
@@ -231,6 +258,33 @@ namespace Solitaire.Cli
                     var rf = ReadReplay(path);
                     var cfg = new FreeCellConfig(rf.config.cells, rf.config.foundations, rf.config.tableaus, rf.config.allowSequenceMoves);
                     var s = FreeCellState.NewGame(rf.seed, cfg);
+            string usedShuffle = "xor";
+            if (rf.moves.Count > 0)
+            {
+                var first = rf.moves[0];
+                var m0 = new Move(Enum.Parse<MoveKind>(first.kind, true), first.from, first.to, first.count);
+                try
+                {
+                    // try default
+                    var _ = (FreeCellState)s.Apply(m0);
+                }
+                catch
+                {
+                    // fallback to .NET Random compatible shuffle
+                    var s2 = FreeCellState.NewGame(rf.seed, cfg, "dotnet");
+                    try
+                    {
+                        var __ = (FreeCellState)s2.Apply(m0);
+                        s = s2;
+                        usedShuffle = "dotnet";
+                    }
+                    catch
+                    {
+                        // leave as default; will error below when applying
+                    }
+                }
+            }
+            Console.WriteLine($"[Replay] using shuffle='{usedShuffle}'");
 
                     int applied = 0;
                     foreach (var rm in rf.moves)
@@ -482,8 +536,10 @@ namespace Solitaire.Cli
                 case "c2t": return MoveKind.CellToTableau;
                 case "t2f": return MoveKind.TableauToFoundation;
                 case "c2f": return MoveKind.CellToFoundation;
+                case "f2t": return MoveKind.FoundationToTableau;
+                case "f2c": return MoveKind.FoundationToCell;
             }
-            throw new ArgumentException("Unknown move kind: " + token + " (try: t2t, t2c, c2t, t2f, c2f)");
+            throw new ArgumentException("Unknown move kind: " + token + " (try: t2t, t2c, c2t, t2f, c2f, f2t, f2c)");
         }
 
         struct ScoredMove { public Move move; public int score; public string reason; }
@@ -556,7 +612,7 @@ namespace Solitaire.Cli
             Console.WriteLine("  fc-new --seed <u32>          Start a new FreeCell game");
             Console.WriteLine("  fc-legal                     List legal moves");
             Console.WriteLine("  fc-move <Kind> <from> <to> [count]");
-            Console.WriteLine("    Kind aliases: t2t, t2c, c2t, t2f, c2f");
+            Console.WriteLine("    Kind aliases: t2t, t2c, c2t, t2f, c2f, f2t, f2c");
             Console.WriteLine("  fc-f2t <fIdx> <tIdx>         Move from Foundation(fIdx) back to Tableau(tIdx) via rewind+branch");
             Console.WriteLine("  fc-f2c <fIdx> <cIdx>         Move from Foundation(fIdx) back to Cell(cIdx) via rewind+branch");
             Console.WriteLine("  save <path.json> [--note \"text\"] [--tag a,b,c]  Save current game as replay JSON");
