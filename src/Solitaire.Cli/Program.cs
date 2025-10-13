@@ -7,6 +7,7 @@ using System.Text.Json;
 using Solitaire.Core;
 using Solitaire.FreeCell;
 
+using Solitaire.Cli;
 namespace Solitaire.Cli
 {
     public sealed class ReplayFile
@@ -50,7 +51,7 @@ namespace Solitaire.Cli
         {
             if (args.Length > 0 && string.Equals(args[0], "repl", StringComparison.OrdinalIgnoreCase))
             {
-                Console.WriteLine("Solitaire CLI — REPL mode");
+                Console.WriteLine($"Solitaire CLI v{CliInfo.Version()} — REPL mode");
                 Console.WriteLine("Type 'help' to see commands. Type 'exit' to quit.");
                 while (true)
                 {
@@ -606,7 +607,7 @@ namespace Solitaire.Cli
 
         static void Help()
         {
-            Console.WriteLine("Solitaire CLI");
+            Console.WriteLine($"Solitaire CLI v{CliInfo.Version()}");
             Console.WriteLine("Commands:");
             Console.WriteLine("  repl                         Start interactive session");
             Console.WriteLine("  fc-new --seed <u32>          Start a new FreeCell game");
