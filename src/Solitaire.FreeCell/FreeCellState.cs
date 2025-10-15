@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,11 +7,16 @@ using Solitaire.Core;
 namespace Solitaire.FreeCell
 {
     /// <summary>
-    /// FreeCell core state:
-    /// - Shuffle: DeckUtils.CreateStandard52 + DeckUtils.FisherYatesShuffle(XorShift32)  ← replays compatible
+    /// FreeCell core state with optional items:
+    /// - Shuffle: DeckUtils.CreateStandard52 + DeckUtils.FisherYatesShuffle(XorShift32) (replay compatible)
     /// - Multi-card Tableau-to-Tableau sequence moves (buffer-aware, emits maximal xN)
     /// - Apply() supports m.Count > 1 (order preserved)
     /// - AllowFoundationDownMoves via reflection (default: true if property missing)
+    /// - Items:
+    ///     * Temp Cell: one extra cell slot at index TempCellSlotIndex (== Config.Cells). Inactive until used.
+    ///       UseTempCell() activates if you have charges left. When the temp cell becomes empty after moving its card out,
+    ///       it deactivates automatically. Charges are consumed on activation.
+    ///     * Grab: GrabCard(tableau, depthFromTop) pulls a deeper card within a tableau to the top. Consumes one grab charge.
     /// </summary>
     public sealed class FreeCellState
     {
@@ -24,7 +28,24 @@ namespace Solitaire.FreeCell
         public readonly FreeCellConfig Config;
         private readonly uint Seed;
 
-        private FreeCellState(uint seed, FreeCellConfig cfg, List<Card>[] t, Card?[] cells, int[] ftop, int moves)
+        // Items state
+        public readonly int TempCellSlotIndex; // fixed at Config.Cells
+        public readonly bool TempCellActive;
+        public readonly int TempCellChargesLeft;
+        public readonly int GrabChargesLeft;
+
+        private FreeCellState(
+            uint seed,
+            FreeCellConfig cfg,
+            List<Card>[] t,
+            Card?[] cells,
+            int[] ftop,
+            int moves,
+            bool tempActive,
+            int tempChargesLeft,
+            int grabChargesLeft,
+            int tempCellSlotIndex
+        )
         {
             Seed = seed;
             Config = cfg;
@@ -32,6 +53,11 @@ namespace Solitaire.FreeCell
             Cells = cells;
             FoundationTop = ftop;
             MoveCount = moves;
+
+            TempCellActive = tempActive;
+            TempCellChargesLeft = tempChargesLeft;
+            GrabChargesLeft = grabChargesLeft;
+            TempCellSlotIndex = tempCellSlotIndex;
         }
 
         public static FreeCellState NewGame(uint seed, FreeCellConfig cfg)
@@ -47,9 +73,10 @@ namespace Solitaire.FreeCell
             for (int i = 0; i < t.Length; i++) t[i] = new List<Card>();
             for (int i = 0; i < deck.Count; i++) t[i % cfg.Tableaus].Add(deck[i]);
 
-            var cells = new Card?[cfg.Cells];
+            // +1 slot reserved for temp cell (index == cfg.Cells). It is unusable until activated.
+            var cells = new Card?[cfg.Cells + 1];
             var ftop = new int[4];
-            return new FreeCellState(seed, cfg, t, cells, ftop, 0);
+            return new FreeCellState(seed, cfg, t, cells, ftop, 0, false, cfg.TempCellCharges, cfg.GrabCharges, cfg.Cells);
         }
 
         public static FreeCellState NewGame(uint seed, FreeCellConfig cfg, string shuffleKind)
@@ -69,12 +96,10 @@ namespace Solitaire.FreeCell
             for (int i = 0; i < t.Length; i++) t[i] = new List<Card>();
             for (int i = 0; i < deck.Count; i++) t[i % cfg.Tableaus].Add(deck[i]);
 
-            var cells = new Card?[cfg.Cells];
+            var cells = new Card?[cfg.Cells + 1]; // include temp slot
             var ftop = new int[cfg.Foundations]; // all 0 (empty)
-            return new FreeCellState(seed, cfg, t, cells, ftop, 0);
+            return new FreeCellState(seed, cfg, t, cells, ftop, 0, false, cfg.TempCellCharges, cfg.GrabCharges, cfg.Cells);
         }
-
-
 
         // Reflection shim for optional config switch
         private static bool AllowDown(FreeCellConfig cfg)
@@ -89,6 +114,15 @@ namespace Solitaire.FreeCell
             return true;
         }
 
+        // Item helpers
+        private bool IsCellSlotUsable(int idx)
+        {
+            if (idx < 0 || idx >= Cells.Length) return false;
+            if (idx < Config.Cells) return true;
+            // temp slot
+            return idx == TempCellSlotIndex && TempCellActive;
+        }
+
         public IEnumerable<Move> GetLegalMoves()
         {
             // Tableau -> Foundation / Cell / Tableau
@@ -101,7 +135,7 @@ namespace Solitaire.FreeCell
                     if (CanMoveToFoundation(top)) yield return new Move(MoveKind.TableauToFoundation, src, SuitIndex(top.Suit), 1);
 
                     for (int c = 0; c < Cells.Length; c++)
-                        if (!Cells[c].HasValue) yield return new Move(MoveKind.TableauToCell, src, c, 1);
+                        if (IsCellSlotUsable(c) && !Cells[c].HasValue) yield return new Move(MoveKind.TableauToCell, src, c, 1);
 
                     // Multi-card sequence moves: emit maximal count per (src,dst)
                     for (int dst = 0; dst < Tableaus.Length; dst++)
@@ -117,6 +151,7 @@ namespace Solitaire.FreeCell
             // Cell -> Foundation / Tableau
             for (int c = 0; c < Cells.Length; c++)
             {
+                if (!IsCellSlotUsable(c)) continue;
                 if (Cells[c].HasValue)
                 {
                     var card = Cells[c].Value;
@@ -137,7 +172,7 @@ namespace Solitaire.FreeCell
                     var moving = new Card(suit, (Rank)r);
 
                     for (int c = 0; c < Cells.Length; c++)
-                        if (!Cells[c].HasValue) yield return new Move(MoveKind.FoundationToCell, f, c, 1);
+                        if (IsCellSlotUsable(c) && !Cells[c].HasValue) yield return new Move(MoveKind.FoundationToCell, f, c, 1);
 
                     for (int dst = 0; dst < Tableaus.Length; dst++)
                         if (CanPlaceOnTableau(Tableaus[dst], moving)) yield return new Move(MoveKind.FoundationToTableau, f, dst, 1);
@@ -150,6 +185,11 @@ namespace Solitaire.FreeCell
             var t = CloneTableaus();
             var cells = (Card?[])Cells.Clone();
             var ftop = (int[])FoundationTop.Clone();
+
+            bool tempActive = TempCellActive;
+            int tempCharges = TempCellChargesLeft;
+            int grabCharges = GrabChargesLeft;
+
             int moves = MoveCount + 1;
 
             switch (m.Kind)
@@ -157,6 +197,7 @@ namespace Solitaire.FreeCell
                 case MoveKind.TableauToCell:
                 {
                     RequireTableauIndex(m.From); RequireCellIndex(m.To);
+                    if (!IsCellSlotUsable(m.To)) throw new InvalidOperationException("Cell slot not usable.");
                     if (t[m.From].Count == 0) throw new InvalidOperationException("Empty tableau.");
                     if (cells[m.To].HasValue) throw new InvalidOperationException("Cell not empty.");
                     var card = t[m.From][t[m.From].Count - 1];
@@ -167,11 +208,13 @@ namespace Solitaire.FreeCell
                 case MoveKind.CellToTableau:
                 {
                     RequireCellIndex(m.From); RequireTableauIndex(m.To);
+                    if (!IsCellSlotUsable(m.From)) throw new InvalidOperationException("Cell slot not usable.");
                     if (!cells[m.From].HasValue) throw new InvalidOperationException("Cell empty.");
                     var card = cells[m.From].Value;
                     if (!CanPlaceOnTableau(t[m.To], card)) throw new InvalidOperationException("Illegal placement.");
                     cells[m.From] = null;
                     t[m.To].Add(card);
+                    if (m.From == TempCellSlotIndex) tempActive = false; // auto-deactivate when emptied
                     break;
                 }
                 case MoveKind.TableauToTableau:
@@ -219,12 +262,14 @@ namespace Solitaire.FreeCell
                 case MoveKind.CellToFoundation:
                 {
                     RequireCellIndex(m.From); RequireFoundationIndex(m.To);
+                    if (!IsCellSlotUsable(m.From)) throw new InvalidOperationException("Cell slot not usable.");
                     if (!cells[m.From].HasValue) throw new InvalidOperationException("Cell empty.");
                     var card = cells[m.From].Value;
                     if (SuitIndex(card.Suit) != m.To) throw new InvalidOperationException("Wrong foundation.");
                     if (!CanMoveToFoundation(card)) throw new InvalidOperationException("Illegal to foundation.");
                     cells[m.From] = null;
                     ftop[m.To] = (int)card.Rank;
+                    if (m.From == TempCellSlotIndex) tempActive = false; // auto-deactivate when emptied
                     break;
                 }
                 case MoveKind.FoundationToTableau:
@@ -245,6 +290,7 @@ namespace Solitaire.FreeCell
                     if (!AllowDown(Config)) throw new InvalidOperationException("Foundation down moves disabled.");
                     int r = ftop[m.From];
                     if (r <= 0) throw new InvalidOperationException("Foundation empty.");
+                    if (!IsCellSlotUsable(m.To)) throw new InvalidOperationException("Cell slot not usable.");
                     if (cells[m.To].HasValue) throw new InvalidOperationException("Cell not empty.");
                     var card = new Card(IndexSuit(m.From), (Rank)r);
                     ftop[m.From] = r - 1;
@@ -255,7 +301,57 @@ namespace Solitaire.FreeCell
                     throw new NotSupportedException("Unknown move kind: " + m.Kind);
             }
 
-            return new FreeCellState(Seed, Config, t, cells, ftop, moves);
+            return new FreeCellState(Seed, Config, t, cells, ftop, moves, tempActive, tempCharges, grabCharges, TempCellSlotIndex);
+        }
+
+        // ===== Items API =====
+
+        /// <summary>Activate the temporary cell if you have charges left and the temp slot is empty. Consumes 1 charge on activation.</summary>
+        public FreeCellState UseTempCell()
+        {
+            if (TempCellChargesLeft <= 0) throw new InvalidOperationException("No temp-cell charges left.");
+            if (TempCellActive) throw new InvalidOperationException("Temp cell already active.");
+            if (Cells[TempCellSlotIndex].HasValue) throw new InvalidOperationException("Temp cell slot is occupied.");
+            return new FreeCellState(Seed, Config, CloneTableaus(), (Card?[])Cells.Clone(), (int[])FoundationTop.Clone(),
+                                     MoveCount + 1, true, TempCellChargesLeft - 1, GrabChargesLeft, TempCellSlotIndex);
+        }
+
+        /// <summary>Grab a card located 'depthFromTop' deep within tableau 'tableau' (0 = current top) and move it to the top of that tableau. Consumes 1 grab charge.</summary>
+        public FreeCellState GrabCard(int tableau, int depthFromTop)
+        {
+            RequireTableauIndex(tableau);
+            if (GrabChargesLeft <= 0) throw new InvalidOperationException("No grab charges left.");
+            var t = CloneTableaus();
+            var pile = t[tableau];
+            if (pile.Count == 0) throw new InvalidOperationException("Empty tableau.");
+            if (depthFromTop < 0 || depthFromTop >= pile.Count) throw new ArgumentOutOfRangeException("depthFromTop");
+            int idx = pile.Count - 1 - depthFromTop; // 0 from top => last index
+            if (idx == pile.Count - 1)
+            {
+                // already at top; still consumes a charge to "stabilize"
+            }
+            else
+            {
+                var card = pile[idx];
+                pile.RemoveAt(idx);
+                pile.Add(card);
+            }
+            return new FreeCellState(Seed, Config, t, (Card?[])Cells.Clone(), (int[])FoundationTop.Clone(),
+                                     MoveCount + 1, TempCellActive, TempCellChargesLeft, GrabChargesLeft - 1, TempCellSlotIndex);
+        }
+
+        public FreeCellState WithItemCounts(int tempCharges, int grabCharges)
+        {
+            if (tempCharges < 0) tempCharges = 0;
+            if (grabCharges < 0) grabCharges = 0;
+            return new FreeCellState(Seed, Config, CloneTableaus(), (Card?[])Cells.Clone(), (int[])FoundationTop.Clone(),
+                                     MoveCount, TempCellActive, tempCharges, grabCharges, TempCellSlotIndex);
+        }
+
+        public string ItemsStatusString()
+        {
+            return "TempCell: " + (TempCellActive ? "ACTIVE" : "INACTIVE") + " (idx " + TempCellSlotIndex + "), charges=" + TempCellChargesLeft
+                 + " | Grab charges=" + GrabChargesLeft;
         }
 
         private List<Card>[] CloneTableaus()
@@ -289,7 +385,7 @@ namespace Solitaire.FreeCell
             return (int)card.Rank == expected;
         }
 
-        private static bool IsRed(Suit s) => (s == Suit.Heart) || (s == Suit.Diamond);
+        private static bool IsRed(Suit s) { return (s == Suit.Heart) || (s == Suit.Diamond); }
 
         private static int SuitIndex(Suit s)
         {
@@ -343,9 +439,9 @@ namespace Solitaire.FreeCell
                 else break;
             }
 
-            // Buffer capacity
+            // Buffer capacity counts only usable empty cells
             int freeCells = 0;
-            for (int i = 0; i < Cells.Length; i++) if (!Cells[i].HasValue) freeCells++;
+            for (int i = 0; i < Cells.Length; i++) if (IsCellSlotUsable(i) && !Cells[i].HasValue) freeCells++;
             int emptyTableaus = 0;
             for (int i = 0; i < Tableaus.Length; i++) if (Tableaus[i].Count == 0) emptyTableaus++;
             // Destination empty consumes one empty tableau (cannot be used as staging)

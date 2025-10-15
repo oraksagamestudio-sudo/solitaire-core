@@ -39,7 +39,7 @@ namespace Solitaire.Cli
 
     class Program
     {
-        private static FreeCellState? _fc = null;
+        private static FreeCellState _fc = null;
         private static List<Move> _log = new List<Move>();
         private static uint _currentSeed = 0;
         private static FreeCellConfig _currentConfig = FreeCellConfig.Default;
@@ -90,13 +90,13 @@ namespace Solitaire.Cli
                     _fc = FreeCellState.NewGame(seed, _currentConfig);
                     _log.Clear();
                     Console.WriteLine("[FreeCell] New game. Seed=" + seed);
-                    DumpFreeCell(_fc!);
+                    DumpFreeCell(_fc);
                     break;
                 }
                 case "fc-legal":
                 {
                     EnsureFc();
-                    var moves = _fc!.GetLegalMoves().ToList();
+                    var moves = _fc.GetLegalMoves().ToList();
                     for (int i = 0; i < moves.Count; i++) Console.WriteLine((i + 1).ToString() + ". " + moves[i].ToString());
                     Console.WriteLine("Total legal moves: " + moves.Count);
                     break;
@@ -115,10 +115,10 @@ namespace Solitaire.Cli
                     int to = int.Parse(args[3]);
                     int count = (args.Count >= 5 ? int.Parse(args[4]) : 1);
                     var m = new Move(kind, from, to, count);
-                    _fc = (FreeCellState)_fc!.Apply(m);
+                    _fc = (FreeCellState)_fc.Apply(m);
                     _log.Add(m);
                     Console.WriteLine("[OK] Move applied.");
-                    DumpFreeCell(_fc!);
+                    DumpFreeCell(_fc);
                     break;
                 }
                 case "fc-f2t":
@@ -137,6 +137,53 @@ namespace Solitaire.Cli
                     int f = int.Parse(args[1]);
                     int c = int.Parse(args[2]);
                     FoundationPop("c", f, c);
+                    break;
+                }
+                case "items":
+                {
+                    EnsureFc();
+                    if (args.Count == 1 || (args.Count >= 2 && args[1] == "show"))
+                    {
+                        Console.WriteLine("[Items] " + _fc.ItemsStatusString());
+                        Console.WriteLine("Temp cell index is " + _fc.TempCellSlotIndex + " (usable only when ACTIVE).");
+                        Console.WriteLine("Commands: use-temp | grab <tableau> <depthFromTop> | items set temp <n> [grab <n>]");
+                        break;
+                    }
+                    if (args.Count >= 3 && args[1] == "set")
+                    {
+                        int temp = _fc.TempCellChargesLeft;
+                        int grab = _fc.GrabChargesLeft;
+                        int i = 2;
+                        while (i < args.Count)
+                        {
+                            if (args[i] == "temp" && i + 1 < args.Count) { int.TryParse(args[i + 1], out temp); i += 2; }
+                            else if (args[i] == "grab" && i + 1 < args.Count) { int.TryParse(args[i + 1], out grab); i += 2; }
+                            else { i++; }
+                        }
+                        _fc = _fc.WithItemCounts(temp, grab);
+                        Console.WriteLine("[Items] set temp=" + temp + " grab=" + grab);
+                        break;
+                    }
+                    Console.WriteLine("Usage: items [show] | items set temp <n> [grab <n>]");
+                    break;
+                }
+                case "use-temp":
+                {
+                    EnsureFc();
+                    _fc = _fc.UseTempCell();
+                    Console.WriteLine("[Items] Temp cell activated. Charges left=" + _fc.TempCellChargesLeft + " (slot " + _fc.TempCellSlotIndex + ")");
+                    DumpFreeCell(_fc);
+                    break;
+                }
+                case "grab":
+                {
+                    EnsureFc();
+                    if (args.Count < 3) { Console.WriteLine("Usage: grab <tableau> <depthFromTop>"); return; }
+                    int t = int.Parse(args[1]);
+                    int depth = int.Parse(args[2]);
+                    _fc = _fc.GrabCard(t, depth);
+                    Console.WriteLine("[Items] Grabbed depth " + depth + " from tableau " + t + ". Charges left=" + _fc.GrabChargesLeft);
+                    DumpFreeCell(_fc);
                     break;
                 }
                 case "save":
@@ -195,33 +242,30 @@ namespace Solitaire.Cli
                     var rf = ReadReplay(path);
                     var cfg = new FreeCellConfig(rf.config.cells, rf.config.foundations, rf.config.tableaus, rf.config.allowSequenceMoves);
                     var s = FreeCellState.NewGame(rf.seed, cfg);
-            string usedShuffle = "xor";
-            if (rf.moves.Count > 0)
-            {
-                var first = rf.moves[0];
-                var m0 = new Move(Enum.Parse<MoveKind>(first.kind, true), first.from, first.to, first.count);
-                try
-                {
-                    // try default
-                    var _ = (FreeCellState)s.Apply(m0);
-                }
-                catch
-                {
-                    // fallback to .NET Random compatible shuffle
-                    var s2 = FreeCellState.NewGame(rf.seed, cfg, "dotnet");
-                    try
+                    string usedShuffle = "xor";
+                    if (rf.moves.Count > 0)
                     {
-                        var __ = (FreeCellState)s2.Apply(m0);
-                        s = s2;
-                        usedShuffle = "dotnet";
+                        var first = rf.moves[0];
+                        var m0 = new Move(Enum.Parse<MoveKind>(first.kind, true), first.from, first.to, first.count);
+                        try
+                        {
+                            var _ = (FreeCellState)s.Apply(m0);
+                        }
+                        catch
+                        {
+                            var s2 = FreeCellState.NewGame(rf.seed, cfg, "dotnet");
+                            try
+                            {
+                                var __ = (FreeCellState)s2.Apply(m0);
+                                s = s2;
+                                usedShuffle = "dotnet";
+                            }
+                            catch
+                            {
+                            }
+                        }
                     }
-                    catch
-                    {
-                        // leave as default; will error below when applying
-                    }
-                }
-            }
-            Console.WriteLine($"[Replay] using shuffle='{usedShuffle}'");
+                    Console.WriteLine("[Replay] using shuffle='" + usedShuffle + "'");
 
                     int applied = 0;
                     for (int i = 0; i < rf.moves.Count && applied < until; i++)
@@ -249,7 +293,7 @@ namespace Solitaire.Cli
                     ).ToList();
 
                     Console.WriteLine("[Replayed] applied " + applied + " moves of " + rf.moves.Count);
-                    DumpFreeCell(_fc!);
+                    DumpFreeCell(_fc);
                     break;
                 }
                 case "load":
@@ -259,33 +303,30 @@ namespace Solitaire.Cli
                     var rf = ReadReplay(path);
                     var cfg = new FreeCellConfig(rf.config.cells, rf.config.foundations, rf.config.tableaus, rf.config.allowSequenceMoves);
                     var s = FreeCellState.NewGame(rf.seed, cfg);
-            string usedShuffle = "xor";
-            if (rf.moves.Count > 0)
-            {
-                var first = rf.moves[0];
-                var m0 = new Move(Enum.Parse<MoveKind>(first.kind, true), first.from, first.to, first.count);
-                try
-                {
-                    // try default
-                    var _ = (FreeCellState)s.Apply(m0);
-                }
-                catch
-                {
-                    // fallback to .NET Random compatible shuffle
-                    var s2 = FreeCellState.NewGame(rf.seed, cfg, "dotnet");
-                    try
+                    string usedShuffle = "xor";
+                    if (rf.moves.Count > 0)
                     {
-                        var __ = (FreeCellState)s2.Apply(m0);
-                        s = s2;
-                        usedShuffle = "dotnet";
+                        var first = rf.moves[0];
+                        var m0 = new Move(Enum.Parse<MoveKind>(first.kind, true), first.from, first.to, first.count);
+                        try
+                        {
+                            var _ = (FreeCellState)s.Apply(m0);
+                        }
+                        catch
+                        {
+                            var s2 = FreeCellState.NewGame(rf.seed, cfg, "dotnet");
+                            try
+                            {
+                                var __ = (FreeCellState)s2.Apply(m0);
+                                s = s2;
+                                usedShuffle = "dotnet";
+                            }
+                            catch
+                            {
+                            }
+                        }
                     }
-                    catch
-                    {
-                        // leave as default; will error below when applying
-                    }
-                }
-            }
-            Console.WriteLine($"[Replay] using shuffle='{usedShuffle}'");
+                    Console.WriteLine("[Replay] using shuffle='" + usedShuffle + "'");
 
                     int applied = 0;
                     foreach (var rm in rf.moves)
@@ -304,7 +345,7 @@ namespace Solitaire.Cli
                     ).ToList();
 
                     Console.WriteLine("[Loaded] " + path + " | moves=" + applied);
-                    DumpFreeCell(_fc!);
+                    DumpFreeCell(_fc);
                     break;
                 }
                 case "replay-info":
@@ -362,7 +403,7 @@ namespace Solitaire.Cli
                     EnsureFc();
                     int topN = 5;
                     if (args.Count >= 2) int.TryParse(args[1], out topN);
-                    var scored = ScoreMoves(_fc!).OrderByDescending(x => x.score).Take(topN).ToList();
+                    var scored = ScoreMoves(_fc).OrderByDescending(x => x.score).Take(topN).ToList();
                     if (scored.Count == 0) { Console.WriteLine("(no legal moves)"); break; }
                     for (int i = 0; i < scored.Count; i++)
                     {
@@ -377,15 +418,15 @@ namespace Solitaire.Cli
                     int applied = 0;
                     while (true)
                     {
-                        var move = _fc!.GetLegalMoves().FirstOrDefault(m =>
+                        var move = _fc.GetLegalMoves().FirstOrDefault(m =>
                             m.Kind == MoveKind.TableauToFoundation || m.Kind == MoveKind.CellToFoundation);
                         if (move.Kind == 0 && move.From == 0 && move.To == 0 && move.Count == 0) break;
-                        _fc = (FreeCellState)_fc!.Apply(move);
+                        _fc = (FreeCellState)_fc.Apply(move);
                         _log.Add(move);
                         applied++;
                     }
                     Console.WriteLine("[Auto] foundation moves applied: " + applied);
-                    DumpFreeCell(_fc!);
+                    DumpFreeCell(_fc);
                     break;
                 }
                 case "undo":
@@ -402,13 +443,13 @@ namespace Solitaire.Cli
                     foreach (var m in _log) s2 = (FreeCellState)s2.Apply(m);
                     _fc = s2;
                     Console.WriteLine("[Undo] reverted " + n + " move(s).");
-                    DumpFreeCell(_fc!);
+                    DumpFreeCell(_fc);
                     break;
                 }
                 case "board":
                 {
                     EnsureFc();
-                    DumpFreeCell(_fc!);
+                    DumpFreeCell(_fc);
                     break;
                 }
                 case "pretty":
@@ -441,11 +482,11 @@ namespace Solitaire.Cli
             }
             else if (destType == "c")
             {
-                if (destIndex < 0 || destIndex >= _currentConfig.Cells) throw new ArgumentOutOfRangeException(nameof(destIndex));
+                if (destIndex < 0 || (_fc != null && (destIndex >= _fc.Cells.Length))) throw new ArgumentOutOfRangeException(nameof(destIndex));
             }
             else throw new ArgumentException("destType must be 't' or 'c'");
 
-            var topRank = _fc!.FoundationTop[foundationIndex];
+            var topRank = _fc.FoundationTop[foundationIndex];
             if (topRank == 0)
             {
                 Console.WriteLine("[F-POP] Foundation " + foundationIndex + " is empty.");
@@ -488,7 +529,6 @@ namespace Solitaire.Cli
                     branch = new Move(MoveKind.TableauToCell, placingMove.From, destIndex, 1);
                 else
                 {
-                    // from cell -> returning to same cell is effectively done by rewind; other cells need two-step which we don't synthesize here
                     if (placingMove.From != destIndex)
                     {
                         Console.WriteLine("[F-POP] The card originally came from cell " + placingMove.From + ". Can only return to the same cell.");
@@ -616,6 +656,10 @@ namespace Solitaire.Cli
             Console.WriteLine("    Kind aliases: t2t, t2c, c2t, t2f, c2f, f2t, f2c");
             Console.WriteLine("  fc-f2t <fIdx> <tIdx>         Move from Foundation(fIdx) back to Tableau(tIdx) via rewind+branch");
             Console.WriteLine("  fc-f2c <fIdx> <cIdx>         Move from Foundation(fIdx) back to Cell(cIdx) via rewind+branch");
+            Console.WriteLine("  items [show]                 Show item status");
+            Console.WriteLine("  items set temp <n> [grab <n>]  Set item charges");
+            Console.WriteLine("  use-temp                     Activate temporary cell (consumes 1 charge)");
+            Console.WriteLine("  grab <t> <depthFromTop>      Pull that card to top of tableau t (consumes 1 charge)");
             Console.WriteLine("  save <path.json> [--note \"text\"] [--tag a,b,c]  Save current game as replay JSON");
             Console.WriteLine("  replay <path.json> [--until N]  Replay file (apply first N moves)");
             Console.WriteLine("  load <path.json>             Load file and set current state to result");
@@ -628,7 +672,7 @@ namespace Solitaire.Cli
             Console.WriteLine("  pretty on|off                Toggle ANSI colored board rendering (default ON)");
             Console.WriteLine();
             Console.WriteLine("Index notes:");
-            Console.WriteLine("  Tableaus: 0..7  | Cells: 0..3  | Foundations(suit index): 0=Spade,1=Heart,2=Diamond,3=Club");
+            Console.WriteLine("  Tableaus: 0..7  | Cells: 0..3 (temp slot index is 4 when active) | Foundations(suit index): 0=Spade,1=Heart,2=Diamond,3=Club");
         }
 
         static void EnsureFc()
@@ -640,10 +684,18 @@ namespace Solitaire.Cli
         {
             if (_pretty) { DumpBoardPretty(s); return; }
 
-            var cellsStr = string.Join(", ", s.Cells.Select(c => c.HasValue ? c.Value.ToString() : "-"));
+            var cellsStrList = new List<string>();
+            for (int ci = 0; ci < s.Cells.Length; ci++)
+            {
+                bool usable = (ci < _currentConfig.Cells) || (ci == s.TempCellSlotIndex && s.TempCellActive);
+                var token = s.Cells[ci].HasValue ? s.Cells[ci].Value.ToString() : (usable ? "--" : "xx");
+                cellsStrList.Add(token);
+            }
+            var cellsStr = string.Join(", ", cellsStrList);
             Console.WriteLine("Moves=" + s.MoveCount
                               + "  Foundations=" + string.Join(",", s.FoundationTop)
                               + "  Cells=[" + cellsStr + "]");
+            Console.WriteLine("Items: " + s.ItemsStatusString());
             for (int i = 0; i < s.Tableaus.Length; i++)
             {
                 var t = s.Tableaus[i];
@@ -701,15 +753,19 @@ namespace Solitaire.Cli
             }
             Console.WriteLine(sb.ToString());
 
-            // Cells
+            // Cells: render normal 0..Cells-1; temp slot shows "--" when active, "xx" when inactive
             var csb = new StringBuilder();
             csb.Append("Cells: ");
             for (int i = 0; i < s.Cells.Length; i++)
             {
-                string token = s.Cells[i].HasValue ? RenderCardShort(s.Cells[i].Value, true) : "--";
+                bool usable = (i < _currentConfig.Cells) || (i == s.TempCellSlotIndex && s.TempCellActive);
+                string token = s.Cells[i].HasValue ? RenderCardShort(s.Cells[i].Value, true) : (usable ? "--" : "xx");
                 csb.Append(RightPadVisible(token, CW) + "  ");
             }
             Console.WriteLine(csb.ToString());
+
+            // Items line
+            Console.WriteLine("Items: " + s.ItemsStatusString());
 
             // Tableaus header
             var hb = new StringBuilder();
@@ -724,14 +780,14 @@ namespace Solitaire.Cli
             int maxH = 0;
             for (int i = 0; i < s.Tableaus.Length; i++) if (s.Tableaus[i].Count > maxH) maxH = s.Tableaus[i].Count;
 
-            // Print rows TOP-aligned (no bottom-sticking), while showing bottom->top within each column
+            // Print rows TOP-aligned, showing bottom->top within each column
             for (int r = 0; r < maxH; r++)
             {
                 var line = new StringBuilder();
                 for (int col = 0; col < s.Tableaus.Length; col++)
                 {
                     var pile = s.Tableaus[col];
-                    int idx = r; // 0=bottom card, grows upward; top card appears on lower rows for taller piles
+                    int idx = r; // 0=bottom card
                     string cell = (idx < pile.Count) ? RenderCardShort(pile[idx], true) : "";
                     line.Append("  " + RightPadVisible(cell, CW));
                 }
