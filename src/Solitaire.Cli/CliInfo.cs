@@ -6,16 +6,17 @@ namespace Solitaire.Cli
 {
     internal static class CliInfo
     {
+        
         public static string Version()
         {
             try
             {
                 Version v = Assembly.GetExecutingAssembly().GetName().Version;
-                return v != null ? v.ToString() : "1.0.0.0";
+                return v != null ? v.ToString() : "1.2.0.0a";
             }
             catch
             {
-                return "1.0.0.0";
+                return "1.2.0.0e";
             }
         }
     }

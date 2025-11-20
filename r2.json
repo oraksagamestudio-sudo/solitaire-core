@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "gameId": "FreeCell",
+  "seed": 12345,
+  "config": {
+    "cells": 4,
+    "foundations": 4,
+    "tableaus": 8,
+    "allowSequenceMoves": true
+  },
+  "moves": [
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 0,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 0,
+      "to": 1,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 0,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 0,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "item",
+      "op": "temp",
+      "from": 0,
+      "to": 0,
+      "count": 0,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 0,
+      "to": 4,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToFoundation",
+      "from": 4,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    }
+  ],
+  "createdAt": "2025-10-17T21:57:58.9440350\u002B09:00",
+  "notes": "",
+  "tags": [],
+  "metadata": {
+    "cli": "Solitaire.Cli",
+    "cliVersion": "1",
+    "os": "Unix 15.6.1",
+    "items.temp.active": "0",
+    "items.temp.charges": "0",
+    "items.grab.charges": "0",
+    "items.siphon.charges": "0",
+    "game.finished": "0"
+  },
+  "snapshot": {
+    "tableaus": [
+      "3djh",
+      "kc8s6h2s8hjc7s",
+      "ah7h4s6c5d9d9h",
+      "2hactckhtsqhkd",
+      "4d9s6s5cas4c",
+      "3c2c7c4hqdth",
+      "2d6dqs5sksqc",
+      "5h7djd3hjstd"
+    ],
+    "cells": [
+      "9c",
+      "8c",
+      "3s",
+      "8d"
+    ],
+    "foundations": [
+      "",
+      "",
+      "ad",
+      ""
+    ],
+    "moveCount": 6,
+    "tempActive": false,
+    "tempCellIndex": 4,
+    "tempCharges": 0,
+    "grabCharges": 0,
+    "siphonCharges": 0
+  }
+}

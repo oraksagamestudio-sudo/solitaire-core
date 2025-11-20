@@ -1,3 +1,4 @@
+// FILE: src/Solitaire.Cli/Program.cs
 using System;
 using System.Linq;
 using System.IO;
@@ -7,51 +8,42 @@ using System.Text.Json;
 using Solitaire.Core;
 using Solitaire.FreeCell;
 
-using Solitaire.Cli;
 namespace Solitaire.Cli
 {
-    public sealed class ReplayFile
-    {
-        public int version { get; set; } = 1;
-        public string gameId { get; set; } = "FreeCell";
-        public uint seed { get; set; }
-        public ReplayConfig config { get; set; } = new ReplayConfig();
-        public List<ReplayMove> moves { get; set; } = new List<ReplayMove>();
-        public string createdAt { get; set; } = "";
-        public string notes { get; set; } = "";
-        public List<string> tags { get; set; } = new List<string>();
-        public Dictionary<string,string> metadata { get; set; } = new Dictionary<string, string>();
-    }
-    public sealed class ReplayConfig
-    {
-        public int cells { get; set; } = 4;
-        public int foundations { get; set; } = 4;
-        public int tableaus { get; set; } = 8;
-        public bool allowSequenceMoves { get; set; } = true;
-    }
-    public sealed class ReplayMove
-    {
-        public string kind { get; set; } = "";
-        public int from { get; set; }
-        public int to { get; set; }
-        public int count { get; set; }
-    }
-
-    class Program
+    // NOTE: Program is now partial. Helpers and models are split across files.
+    partial class Program
     {
         private static FreeCellState _fc = null;
         private static List<Move> _log = new List<Move>();
+        private static List<ReplayMove> _steps = new List<ReplayMove>(); // moves + items timeline
         private static uint _currentSeed = 0;
         private static FreeCellConfig _currentConfig = FreeCellConfig.Default;
 
-        // default pretty = ON
+        // pretty print is ON by default
         private static bool _pretty = true;
+
+        // Items
+        private static bool _tempActive = false;
+        private static int _tempCellIndex = 4;
+        private static int _tempCharges = 0;
+        private static int _grabCharges = 0;
+        private static int _siphonCharges = 0; // pull next-needed suit card from anywhere to foundation
+        private static bool _tempEverHeld = false; // 임시셀이 한 번이라도 카드를 보유했는가(활성화 이후)
+        // --- session base tracking for undo ---
+        private static bool _baseIsSnapshot = false;
+        private static ReplaySnapshot _baseSnapshot = null; // Program.Snapshot.cs의 타입
+        private static string _baseShuffleKind = "xor";     // "xor" | "dotnet"
+        // --- baseline-from-seed tracking ---
+        private static bool _baseIsSeed = false;
+        private static uint _baseSeed = 0;
+        private static FreeCellConfig _baseConfig = FreeCellConfig.Default;
+        private static int _baseTempCharges = 0, _baseGrabCharges = 0, _baseSiphonCharges = 0;
 
         static int Main(string[] args)
         {
             if (args.Length > 0 && string.Equals(args[0], "repl", StringComparison.OrdinalIgnoreCase))
             {
-                Console.WriteLine($"Solitaire CLI v{CliInfo.Version()} — REPL mode");
+                Console.WriteLine("Solitaire CLI v" + CliInfo.Version() + " - REPL mode");
                 Console.WriteLine("Type 'help' to see commands. Type 'exit' to quit.");
                 while (true)
                 {
@@ -81,386 +73,716 @@ namespace Solitaire.Cli
             switch (cmd)
             {
                 case "fc-new":
-                {
-                    uint seed = 12345;
-                    for (int i = 1; i + 1 < args.Count; i++)
-                        if (args[i] == "--seed" && uint.TryParse(args[i + 1], out var s)) seed = s;
-                    _currentSeed = seed;
-                    _currentConfig = FreeCellConfig.Default;
-                    _fc = FreeCellState.NewGame(seed, _currentConfig);
-                    _log.Clear();
-                    Console.WriteLine("[FreeCell] New game. Seed=" + seed);
-                    DumpFreeCell(_fc);
-                    break;
-                }
-                case "fc-legal":
-                {
-                    EnsureFc();
-                    var moves = _fc.GetLegalMoves().ToList();
-                    for (int i = 0; i < moves.Count; i++) Console.WriteLine((i + 1).ToString() + ". " + moves[i].ToString());
-                    Console.WriteLine("Total legal moves: " + moves.Count);
-                    break;
-                }
-                case "fc-move":
-                {
-                    EnsureFc();
-                    if (args.Count < 4)
                     {
-                        Console.WriteLine("Usage: fc-move <Kind> <from> <to> [count]");
-                        Console.WriteLine("  Kind aliases: t2t, t2c, c2t, t2f, c2f, f2t, f2c");
+                        uint seed = 12345;
+                        for (int i = 1; i + 1 < args.Count; i++)
+                            if (args[i] == "--seed" && uint.TryParse(args[i + 1], out var s)) seed = s;
+                        _currentSeed = seed;
+                        _currentConfig = FreeCellConfig.Default;
+                        _fc = FreeCellState.NewGame(seed, _currentConfig);
+                        _log.Clear();
+                        _steps.Clear();
+                        _tempActive = false;
+                        _tempCharges = 0;
+                        _grabCharges = 0;
+                        _siphonCharges = 0;
+                        _gameFinished = false;
+                        Console.WriteLine("[FreeCell] New game. Seed=" + seed);
+                        SetSessionBaseToSeed(_currentSeed, _currentConfig, "xor", _steps, _tempCharges, _grabCharges, _siphonCharges);
+                        DumpFreeCell(_fc);
+                        break;
+                    }
+                case "fc-legal":
+                    {
+                        EnsureFc();
+                        var moves = _fc.GetLegalMoves().ToList();
+                        for (int i = 0; i < moves.Count; i++) Console.WriteLine((i + 1).ToString() + ". " + moves[i].ToString());
+                        Console.WriteLine("Total legal moves: " + moves.Count);
+                        break;
+                    }
+                case "fc-move":
+                    {
+                        EnsureFc();
+                        if (args.Count < 4)
+                        {
+                            Console.WriteLine("Usage: fc-move <Kind> <from> <to> [count]");
+                            Console.WriteLine("  Kind aliases: t2t, t2c, c2t, t2f, c2f, f2t, f2c");
+                            return;
+                        }
+                        var kind = ParseMoveKind(args[1]);
+                        int from = int.Parse(args[2]);
+                        int to = int.Parse(args[3]);
+                        int count = (args.Count >= 5 ? int.Parse(args[4]) : 1);
+                        var m = new Move(kind, from, to, count);
+
+                        // ---- 추가: T2T가 임시셀에 '관여'하면 사용자 확인 ----
+                        bool tempInvolved = _tempActive
+                            && kind == MoveKind.TableauToTableau
+                            && (
+                                TempCapacityNeeded(_fc, m) // 빈 공간 용량 사용
+                                || (_fc.Cells.Length > _tempCellIndex && _fc.Cells[_tempCellIndex].HasValue) // 임시셀에 실제 카드 보유 중
+                            );
+
+                        if (tempInvolved)
+                        {
+                            Console.Write("[TempCell] This T2T move will involve the Temp cell. Proceed? [y/N]: ");
+                            var ans = Console.ReadLine()?.Trim().ToLowerInvariant();
+                            if (!(ans == "y" || ans == "yes"))
+                            {
+                                Console.WriteLine("[CANCELLED] Move aborted.");
+                                return;
+                            }
+                        }
+
+                        bool usedTempCapacity = TempCapacityNeeded(_fc, m);
+
+                        _fc = (FreeCellState)_fc.Apply(m);
+                        _log.Add(m);
+                        _steps.Add(new ReplayMove
+                        {
+                            kind = "move",
+                            op = Enum.GetName(typeof(MoveKind), kind) ?? "TableauToCell",
+                            from = from,
+                            to = to,
+                            count = count
+                        });
+
+                        if (_tempActive && _fc.Cells.Length > _tempCellIndex && _fc.Cells[_tempCellIndex].HasValue)
+                            _tempEverHeld = true;
+
+                        MaybeCloseTempCell(usedTempCapacity);
+                        RecalcVictoryAndAnnounce(_fc);
+                        Console.WriteLine("[OK] Move applied.");
+                        DumpFreeCell(_fc);
+                        break;
+                    }
+                case "fc-f2t":
+                    {
+                        EnsureFc();
+                        if (args.Count < 3) { Console.WriteLine("Usage: fc-f2t <foundationIndex 0..3> <tableauIndex 0..N-1>"); return; }
+                        int f = int.Parse(args[1]);
+                        int t = int.Parse(args[2]);
+                        FoundationPop("t", f, t);
+                        RecalcVictoryAndAnnounce(_fc);
+                        break;
+                    }
+                case "fc-f2c":
+                    {
+                        EnsureFc();
+                        if (args.Count < 3) { Console.WriteLine("Usage: fc-f2c <foundationIndex 0..3> <cellIndex 0..C-1>"); return; }
+                        int f = int.Parse(args[1]);
+                        int c = int.Parse(args[2]);
+                        FoundationPop("c", f, c);
+                        RecalcVictoryAndAnnounce(_fc);
+                        break;
+                    }
+
+                // ---- Items: show/set/use ----
+                case "items":
+                    {
+                        if (args.Count == 1 || (args.Count == 2 && args[1] == "show"))
+                        {
+                            ShowItems();
+                            return;
+                        }
+                        if (args.Count >= 3 && args[1] == "set")
+                        {
+                            int i = 2;
+                            while (i < args.Count)
+                            {
+                                if (i + 1 < args.Count && args[i] == "temp") { _tempCharges = int.Parse(args[i + 1]); i += 2; continue; }
+                                if (i + 1 < args.Count && args[i] == "grab") { _grabCharges = int.Parse(args[i + 1]); i += 2; continue; }
+                                if (i + 1 < args.Count && (args[i] == "siphon" || args[i] == "sip")) { _siphonCharges = int.Parse(args[i + 1]); i += 2; continue; }
+                                break;
+                            }
+                            Console.WriteLine("[Items] temp=" + _tempCharges + " grab=" + _grabCharges + " siphon=" + _siphonCharges);
+                            return;
+                        }
+                        Console.WriteLine("Usage: items [show] | items set temp <n> [grab <n>] [siphon <n>]");
                         return;
                     }
-                    var kind = ParseMoveKind(args[1]);
-                    int from = int.Parse(args[2]);
-                    int to = int.Parse(args[3]);
-                    int count = (args.Count >= 5 ? int.Parse(args[4]) : 1);
-                    var m = new Move(kind, from, to, count);
-                    _fc = (FreeCellState)_fc.Apply(m);
-                    _log.Add(m);
-                    Console.WriteLine("[OK] Move applied.");
-                    DumpFreeCell(_fc);
-                    break;
-                }
-                case "fc-f2t":
-                {
-                    EnsureFc();
-                    if (args.Count < 3) { Console.WriteLine("Usage: fc-f2t <foundationIndex 0..3> <tableauIndex 0..N-1>"); return; }
-                    int f = int.Parse(args[1]);
-                    int t = int.Parse(args[2]);
-                    FoundationPop("t", f, t);
-                    break;
-                }
-                case "fc-f2c":
-                {
-                    EnsureFc();
-                    if (args.Count < 3) { Console.WriteLine("Usage: fc-f2c <foundationIndex 0..3> <cellIndex 0..C-1>"); return; }
-                    int f = int.Parse(args[1]);
-                    int c = int.Parse(args[2]);
-                    FoundationPop("c", f, c);
-                    break;
-                }
-                case "items":
-                {
-                    EnsureFc();
-                    if (args.Count == 1 || (args.Count >= 2 && args[1] == "show"))
-                    {
-                        Console.WriteLine("[Items] " + _fc.ItemsStatusString());
-                        Console.WriteLine("Temp cell index is " + _fc.TempCellSlotIndex + " (usable only when ACTIVE).");
-                        Console.WriteLine("Commands: use-temp | grab <tableau> <depthFromTop> | items set temp <n> [grab <n>]");
-                        break;
-                    }
-                    if (args.Count >= 3 && args[1] == "set")
-                    {
-                        int temp = _fc.TempCellChargesLeft;
-                        int grab = _fc.GrabChargesLeft;
-                        int i = 2;
-                        while (i < args.Count)
-                        {
-                            if (args[i] == "temp" && i + 1 < args.Count) { int.TryParse(args[i + 1], out temp); i += 2; }
-                            else if (args[i] == "grab" && i + 1 < args.Count) { int.TryParse(args[i + 1], out grab); i += 2; }
-                            else { i++; }
-                        }
-                        _fc = _fc.WithItemCounts(temp, grab);
-                        Console.WriteLine("[Items] set temp=" + temp + " grab=" + grab);
-                        break;
-                    }
-                    Console.WriteLine("Usage: items [show] | items set temp <n> [grab <n>]");
-                    break;
-                }
                 case "use-temp":
-                {
-                    EnsureFc();
-                    _fc = _fc.UseTempCell();
-                    Console.WriteLine("[Items] Temp cell activated. Charges left=" + _fc.TempCellChargesLeft + " (slot " + _fc.TempCellSlotIndex + ")");
-                    DumpFreeCell(_fc);
-                    break;
-                }
-                case "grab":
-                {
-                    EnsureFc();
-                    if (args.Count < 3) { Console.WriteLine("Usage: grab <tableau> <depthFromTop>"); return; }
-                    int t = int.Parse(args[1]);
-                    int depth = int.Parse(args[2]);
-                    _fc = _fc.GrabCard(t, depth);
-                    Console.WriteLine("[Items] Grabbed depth " + depth + " from tableau " + t + ". Charges left=" + _fc.GrabChargesLeft);
-                    DumpFreeCell(_fc);
-                    break;
-                }
-                case "save":
-                {
-                    EnsureFc();
-                    if (args.Count < 2) { Console.WriteLine("Usage: save <path.json> [--note \"text\"] [--tag a,b,c]"); return; }
-                    var path = args[1];
-
-                    string note = "";
-                    List<string> tagList = new List<string>();
-                    for (int i = 2; i < args.Count; i++)
                     {
-                        if (args[i] == "--note" && i + 1 < args.Count) { note = args[i + 1]; i++; }
-                        else if (args[i] == "--tag" && i + 1 < args.Count) { tagList = args[i + 1].Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).ToList(); i++; }
+                        EnsureFc();
+                        if (_tempActive) { Console.WriteLine("[TempCell] already active."); break; }
+                        if (_tempCharges <= 0) { Console.WriteLine("[TempCell] no charges."); break; }
+
+                        _steps.Add(new ReplayMove { kind = "item", op = "temp" });
+
+                        _tempActive = true;
+                        _tempCharges--;
+                        _tempEverHeld = false;
+
+                        if (_fc.Cells.Length <= _tempCellIndex)
+                        {
+                            var cfg2 = new FreeCellConfig(
+                                _currentConfig.Cells + 1,
+                                _currentConfig.Foundations,
+                                _currentConfig.Tableaus,
+                                _currentConfig.AllowSequenceMoves
+                            );
+
+                            var cells2 = new Card?[_fc.Cells.Length + 1];
+                            Array.Copy(_fc.Cells, cells2, _fc.Cells.Length);
+
+                            _fc = new FreeCellStateAccessor(_fc).WithConfigAndCells(cfg2, cells2);
+                            _currentConfig = cfg2;
+                        }
+
+                        RecalcVictoryAndAnnounce(_fc);
+                        Console.WriteLine("[TempCell] Activated (virtual cell index " + _tempCellIndex + ").");
+                        DumpFreeCell(_fc);
+                        break;
+                    }
+                case "grab":
+                    {
+                        EnsureFc();
+                        if (_grabCharges <= 0) { Console.WriteLine("[Grab] no charges."); break; }
+                        if (args.Count < 3) { Console.WriteLine("Usage: grab <tableauIndex> <depth>   (depth>=0: from top, depth<0: from bottom, -1=bottom)"); break; }
+                        int tIndex = int.Parse(args[1]);
+                        if (tIndex < 0 || tIndex >= _fc.Tableaus.Length) { Console.WriteLine("[Grab] invalid tableau index."); break; }
+                        var pile = _fc.Tableaus[tIndex];
+                        int sel = int.Parse(args[2]);
+
+                        int from;
+                        if (sel >= 0)
+                        {
+                            if (sel >= pile.Count) { Console.WriteLine("[Grab] invalid depth."); break; }
+                            from = pile.Count - 1 - sel; // top-based
+                        }
+                        else
+                        {
+                            int idxFromBottom = (-sel) - 1; // -1 = bottom
+                            if (idxFromBottom < 0 || idxFromBottom >= pile.Count) { Console.WriteLine("[Grab] invalid depth."); break; }
+                            from = idxFromBottom;
+                        }
+
+                        var card = pile[from];
+                        var newPile = new List<Card>(pile);
+                        newPile.RemoveAt(from);
+                        newPile.Add(card);
+                        var t = new List<Card>[_fc.Tableaus.Length];
+                        for (int i = 0; i < t.Length; i++) t[i] = new List<Card>(_fc.Tableaus[i]);
+                        t[tIndex] = newPile;
+                        _fc = new FreeCellStateAccessor(_fc).WithTableaus(t);
+
+                        _steps.Add(new ReplayMove { kind = "item", op = "grab", from = tIndex, arg = sel });
+                        _grabCharges--;
+                        RecalcVictoryAndAnnounce(_fc);
+                        Console.WriteLine("[Grab] Pulled " + card.ToString() + " to top of T" + tIndex + ".");
+                        MaybeCloseTempCell(false);
+                        DumpFreeCell(_fc);
+                        break;
+                    }
+                case "siphon":
+                    {
+                        EnsureFc();
+                        if (_siphonCharges <= 0) { Console.WriteLine("[Siphon] no charges."); break; }
+                        if (args.Count < 2) { Console.WriteLine("Usage: siphon <s|h|d|c|rand>"); break; }
+                        string tok = args[1].ToLowerInvariant();
+                        int suitIndex = -1;
+                        if (tok == "rand" || tok == "random")
+                        {
+                            var candidates = FindSiphonCandidateSuits(_fc);
+                            if (candidates.Count == 0) { Console.WriteLine("[Siphon] no available suit to promote."); break; }
+                            var rnd = new Random(unchecked(Environment.TickCount));
+                            suitIndex = candidates[rnd.Next(candidates.Count)];
+                        }
+                        else
+                        {
+                            suitIndex = ParseSuitIndex(tok);
+                        }
+                        if (suitIndex < 0 || suitIndex > 3) { Console.WriteLine("[Siphon] invalid suit token: " + args[1]); break; }
+
+                        FreeCellState next;
+                        Card moved;
+                        string source;
+                        if (_fc.TrySiphonNextToFoundation(suitIndex, out next, out moved, out source))
+                        {
+                            _fc = next;
+                            _siphonCharges--;
+                            _steps.Add(new ReplayMove { kind = "item", op = "siphon", arg = suitIndex });
+                            RecalcVictoryAndAnnounce(_fc);
+                            Console.WriteLine("[Siphon] Moved " + moved.ToString() + " from " + source + " to foundation " + suitIndex + ".");
+                            DumpFreeCell(_fc);
+                        }
+                        else
+                        {
+                            Console.WriteLine("[Siphon] Target card not found anywhere for suit " + args[1] + ".");
+                        }
+                        break;
                     }
 
-                    var rf = new ReplayFile
+                case "save":
                     {
-                        version = 1,
-                        gameId = "FreeCell",
-                        seed = _currentSeed,
-                        config = new ReplayConfig {
-                            cells = _currentConfig.Cells,
-                            foundations = _currentConfig.Foundations,
-                            tableaus = _currentConfig.Tableaus,
-                            allowSequenceMoves = _currentConfig.AllowSequenceMoves
-                        },
-                        moves = _log.Select(m => new ReplayMove {
-                            kind = Enum.GetName(typeof(MoveKind), m.Kind) ?? "TableauToCell",
-                            from = m.From, to = m.To, count = m.Count
-                        }).ToList(),
-                        createdAt = DateTimeOffset.Now.ToString("o"),
-                        notes = note,
-                        tags = tagList,
-                        metadata = new Dictionary<string,string> {
+                        EnsureFc();
+                        if (args.Count < 2) { Console.WriteLine("Usage: save <path.json> [--note \"text\"] [--tag a,b,c]"); return; }
+                        var path = args[1];
+
+                        string note = "";
+                        List<string> tagList = new List<string>();
+                        for (int i = 2; i < args.Count; i++)
+                        {
+                            if (args[i] == "--note" && i + 1 < args.Count) { note = args[i + 1]; i++; }
+                            else if (args[i] == "--tag" && i + 1 < args.Count) { tagList = args[i + 1].Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).ToList(); i++; }
+                        }
+
+                        var rf = new ReplayFile
+                        {
+                            version = 1,
+                            gameId = "FreeCell",
+                            seed = _currentSeed,
+                            config = new ReplayConfig
+                            {
+                                cells = _currentConfig.Cells,
+                                foundations = _currentConfig.Foundations,
+                                tableaus = _currentConfig.Tableaus,
+                                allowSequenceMoves = _currentConfig.AllowSequenceMoves
+                            },
+                            moves = new List<ReplayMove>(_steps),
+                            createdAt = DateTimeOffset.Now.ToString("o"),
+                            notes = note,
+                            tags = tagList,
+                            metadata = new Dictionary<string, string> {
                             { "cli", "Solitaire.Cli" },
                             { "cliVersion", "1" },
-                            { "os", Environment.OSVersion.ToString() }
-                        }
-                    };
+                            { "os", Environment.OSVersion.ToString() },
+                            { "items.temp.active", _tempActive ? "1" : "0" },
+                            { "items.temp.charges", _tempCharges.ToString() },
+                            { "items.grab.charges", _grabCharges.ToString() },
+                            { "items.siphon.charges", _siphonCharges.ToString() },
+                            { "game.finished", _gameFinished ? "1" : "0" }
+                        },
+                            snapshot = MakeSnapshot(_fc)
+                        };
 
-                    var opts = new JsonSerializerOptions { WriteIndented = true };
-                    var json = JsonSerializer.Serialize(rf, opts);
-                    File.WriteAllText(path, json);
-                    Console.WriteLine("[Saved] " + path + " (" + rf.moves.Count + " moves, tags=" + string.Join(",", tagList) + ")");
-                    break;
-                }
+                        var opts = new JsonSerializerOptions { WriteIndented = true };
+                        var json = JsonSerializer.Serialize(rf, opts);
+                        File.WriteAllText(path, json);
+                        Console.WriteLine("[Saved] " + path + " (" + rf.moves.Count + " moves, tags=" + string.Join(",", tagList) + ")");
+                        break;
+                    }
                 case "replay":
-                {
-                    if (args.Count < 2) { Console.WriteLine("Usage: replay <path.json> [--until N]"); return; }
-                    var path = args[1];
-                    int until = int.MaxValue;
-                    for (int i = 2; i + 1 < args.Count; i++)
-                        if (args[i] == "--until" && int.TryParse(args[i + 1], out var n)) until = n;
-
-                    var rf = ReadReplay(path);
-                    var cfg = new FreeCellConfig(rf.config.cells, rf.config.foundations, rf.config.tableaus, rf.config.allowSequenceMoves);
-                    var s = FreeCellState.NewGame(rf.seed, cfg);
-                    string usedShuffle = "xor";
-                    if (rf.moves.Count > 0)
                     {
-                        var first = rf.moves[0];
-                        var m0 = new Move(Enum.Parse<MoveKind>(first.kind, true), first.from, first.to, first.count);
-                        try
+                        if (args.Count < 2) { Console.WriteLine("Usage: replay <path.json> [--until N]"); return; }
+                        var path = args[1];
+                        int until = int.MaxValue;
+                        for (int i = 2; i + 1 < args.Count; i++)
+                            if (args[i] == "--until" && int.TryParse(args[i + 1], out var n)) until = n;
+
+                        var rf = ReadReplay(path);
+                        var cfg = new FreeCellConfig(rf.config.cells, rf.config.foundations, rf.config.tableaus, rf.config.allowSequenceMoves);
+                        var s = FreeCellState.NewGame(rf.seed, cfg);
+                        string usedShuffle = "xor";
+
+                        Move firstMoveForShuffle;
+                        if (TryGetFirstMoveForShuffle(rf.moves, out firstMoveForShuffle))
                         {
-                            var _ = (FreeCellState)s.Apply(m0);
-                        }
-                        catch
-                        {
-                            var s2 = FreeCellState.NewGame(rf.seed, cfg, "dotnet");
-                            try
-                            {
-                                var __ = (FreeCellState)s2.Apply(m0);
-                                s = s2;
-                                usedShuffle = "dotnet";
-                            }
+                            try { var _ = (FreeCellState)s.Apply(firstMoveForShuffle); }
                             catch
                             {
+                                var s2 = FreeCellState.NewGame(rf.seed, cfg, "dotnet");
+                                try { var __ = (FreeCellState)s2.Apply(firstMoveForShuffle); s = s2; usedShuffle = "dotnet"; }
+                                catch { }
                             }
                         }
-                    }
-                    Console.WriteLine("[Replay] using shuffle='" + usedShuffle + "'");
+                        Console.WriteLine("[Replay] using shuffle='" + usedShuffle + "'");
 
-                    int applied = 0;
-                    for (int i = 0; i < rf.moves.Count && applied < until; i++)
-                    {
-                        var rm = rf.moves[i];
-                        var mk = (MoveKind)Enum.Parse(typeof(MoveKind), rm.kind, true);
-                        var m = new Move(mk, rm.from, rm.to, rm.count);
-                        try
+                        _fc = s;
+                        _currentConfig = cfg;
+                        _log.Clear();
+                        _steps.Clear();
+                        _gameFinished = false;
+
+                        int applied = 0;
+                        for (int i = 0; i < rf.moves.Count && applied < until; i++)
                         {
-                            s = (FreeCellState)s.Apply(m);
-                            applied++;
+                            var step = rf.moves[i];
+
+                            try
+                            {
+                                if (TryParseMoveFromReplay(step, out var mv))
+                                {
+                                    bool usedTempCapacity = TempCapacityNeeded(_fc, mv);
+                                    _fc = (FreeCellState)_fc.Apply(mv);
+                                    _log.Add(mv);
+
+                                    if (_tempActive && _fc.Cells.Length > _tempCellIndex && _fc.Cells[_tempCellIndex].HasValue)
+                                        _tempEverHeld = true;
+
+                                    MaybeCloseTempCell(usedTempCapacity);
+                                    _steps.Add(step);
+                                }
+                                else if (string.Equals(step.kind, "item", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    bool ok = ApplyReplayItem(step);
+                                    if (!ok) throw new InvalidOperationException("Failed to apply item step: " + (step.op ?? step.kind));
+                                    _steps.Add(step);
+                                }
+                                else
+                                {
+                                    throw new InvalidOperationException("Unknown replay step kind: " + step.kind);
+                                }
+
+                                applied++;
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("[REPLAY ERROR] step " + (i + 1) + ": " + ex.Message);
+                                if (rf.snapshot != null)
+                                {
+                                    try
+                                    {
+                                        _fc = BuildFromSnapshot(rf.seed, cfg, rf.snapshot);
+                                        Console.WriteLine("[Replay] fell back to snapshot.");
+                                        applied = rf.moves.Count;
+                                        _steps = new List<ReplayMove>(rf.moves);
+                                    }
+                                    catch { }
+                                }
+                                break;
+                            }
                         }
-                        catch (Exception ex)
+
+                        _steps = rf.moves.Take(applied).ToList();
+
+                        _currentSeed = rf.seed;
+                        _currentConfig = cfg;
+                        _log = rf.moves.Take(applied).Where(IsMoveStep).Select(ToMove).ToList();
+
+                        if (rf.metadata != null)
                         {
-                            Console.WriteLine("[REPLAY ERROR] step " + (i + 1) + ": " + ex.Message);
+                            string v;
+                            if (rf.metadata.TryGetValue("items.temp.active", out v)) _tempActive = v == "1";
+                            if (rf.metadata.TryGetValue("items.temp.charges", out v)) int.TryParse(v, out _tempCharges);
+                            if (rf.metadata.TryGetValue("items.grab.charges", out v)) int.TryParse(v, out _grabCharges);
+                            if (rf.metadata.TryGetValue("items.siphon.charges", out v)) int.TryParse(v, out _siphonCharges);
+                        }
+
+                        RecalcVictoryAndAnnounce(_fc);
+                        SetSessionBaseToSeed(_currentSeed, _currentConfig, usedShuffle, _steps, _tempCharges, _grabCharges, _siphonCharges);
+                        Console.WriteLine("[Replayed] applied " + applied + " moves of " + rf.moves.Count);
+                        DumpFreeCell(_fc);
+                        break;
+                    }
+                case "load":
+                    {
+                        if (args.Count < 2) { Console.WriteLine("Usage: load <path.json>"); return; }
+                        var path = args[1];
+                        var rf = ReadReplay(path);
+                        var cfg = new FreeCellConfig(rf.config.cells, rf.config.foundations, rf.config.tableaus, rf.config.allowSequenceMoves);
+
+                        string usedShuffle = "xor";
+                        Move firstMoveForShuffle;
+                        if (TryGetFirstMoveForShuffle(rf.moves, out firstMoveForShuffle))
+                        {
+                            var tryS = FreeCellState.NewGame(rf.seed, cfg);
+                            try { var _ = (FreeCellState)tryS.Apply(firstMoveForShuffle); usedShuffle = "xor"; }
+                            catch
+                            {
+                                var tryS2 = FreeCellState.NewGame(rf.seed, cfg, "dotnet");
+                                try { var __ = (FreeCellState)tryS2.Apply(firstMoveForShuffle); usedShuffle = "dotnet"; }
+                                catch { }
+                            }
+                        }
+
+                        // snapshot이 있으면 강제 로드
+                        if (rf.snapshot != null && rf.snapshot.tableaus != null && rf.snapshot.tableaus.Length == cfg.Tableaus)
+                        {
+                            _fc = BuildFromSnapshot(rf.seed, cfg, rf.snapshot);
+                            _currentSeed = rf.seed;
+                            _currentConfig = cfg;
+
+                            _log.Clear();
+                            _steps = new List<ReplayMove>(rf.moves);
+
+                            if (rf.metadata != null && rf.metadata.TryGetValue("game.finished", out var fin))
+                                _gameFinished = fin == "1";
+                            else
+                                _gameFinished = IsVictory(_fc);
+
+                            RecalcVictoryAndAnnounce(_fc);
+                            Console.WriteLine("[Loaded] " + path + " | from snapshot");
+                            SetSessionBaseToSeed(_currentSeed, _currentConfig, usedShuffle, _steps, _tempCharges, _grabCharges, _siphonCharges);
+                            DumpFreeCell(_fc);
                             break;
                         }
-                    }
 
-                    _fc = s;
-                    _currentSeed = rf.seed;
-                    _currentConfig = cfg;
-                    _log = rf.moves.Take(applied).Select(rm =>
-                        new Move((MoveKind)Enum.Parse(typeof(MoveKind), rm.kind, true), rm.from, rm.to, rm.count)
-                    ).ToList();
+                        var s = FreeCellState.NewGame(rf.seed, cfg);
 
-                    Console.WriteLine("[Replayed] applied " + applied + " moves of " + rf.moves.Count);
-                    DumpFreeCell(_fc);
-                    break;
-                }
-                case "load":
-                {
-                    if (args.Count < 2) { Console.WriteLine("Usage: load <path.json>"); return; }
-                    var path = args[1];
-                    var rf = ReadReplay(path);
-                    var cfg = new FreeCellConfig(rf.config.cells, rf.config.foundations, rf.config.tableaus, rf.config.allowSequenceMoves);
-                    var s = FreeCellState.NewGame(rf.seed, cfg);
-                    string usedShuffle = "xor";
-                    if (rf.moves.Count > 0)
-                    {
-                        var first = rf.moves[0];
-                        var m0 = new Move(Enum.Parse<MoveKind>(first.kind, true), first.from, first.to, first.count);
-                        try
+                        _fc = s;
+                        _currentConfig = cfg;
+                        _log.Clear();
+                        _steps.Clear();
+                        _gameFinished = false;
+
+                        int applied = 0;
+                        foreach (var step in rf.moves)
                         {
-                            var _ = (FreeCellState)s.Apply(m0);
+                            if (TryParseMoveFromReplay(step, out var mv))
+                            {
+                                bool usedTempCapacity = TempCapacityNeeded(_fc, mv);
+                                _fc = (FreeCellState)_fc.Apply(mv);
+                                _log.Add(mv);
+
+                                if (_tempActive && _fc.Cells.Length > _tempCellIndex && _fc.Cells[_tempCellIndex].HasValue)
+                                    _tempEverHeld = true;
+
+                                MaybeCloseTempCell(usedTempCapacity);
+                                _steps.Add(step);
+                            }
+                            else if (string.Equals(step.kind, "item", StringComparison.OrdinalIgnoreCase))
+                            {
+                                bool ok = ApplyReplayItem(step);
+                                if (!ok) throw new InvalidOperationException("Failed to apply item step: " + (step.op ?? step.kind));
+                                _steps.Add(step);
+                            }
+                            else
+                            {
+                                throw new InvalidOperationException("Unknown replay step kind: " + step.kind);
+                            }
+                            applied++;
                         }
-                        catch
+
+                        _steps = new List<ReplayMove>(_steps);
+
+                        _currentSeed = rf.seed;
+                        _currentConfig = cfg;
+                        _log = rf.moves.Where(IsMoveStep).Select(ToMove).ToList();
+
+                        if (rf.metadata != null)
                         {
-                            var s2 = FreeCellState.NewGame(rf.seed, cfg, "dotnet");
-                            try
-                            {
-                                var __ = (FreeCellState)s2.Apply(m0);
-                                s = s2;
-                                usedShuffle = "dotnet";
-                            }
-                            catch
-                            {
-                            }
+                            string v;
+                            if (rf.metadata.TryGetValue("items.temp.active", out v)) _tempActive = v == "1";
+                            if (rf.metadata.TryGetValue("items.temp.charges", out v)) int.TryParse(v, out _tempCharges);
+                            if (rf.metadata.TryGetValue("items.grab.charges", out v)) int.TryParse(v, out _grabCharges);
+                            if (rf.metadata.TryGetValue("items.siphon.charges", out v)) int.TryParse(v, out _siphonCharges);
                         }
+
+                        RecalcVictoryAndAnnounce(_fc);
+                        Console.WriteLine("[Loaded] " + path + " | moves=" + applied);
+                        SetSessionBaseToSeed(_currentSeed, _currentConfig, usedShuffle, _steps, _tempCharges, _grabCharges, _siphonCharges);
+                        DumpFreeCell(_fc);
+                        break;
                     }
-                    Console.WriteLine("[Replay] using shuffle='" + usedShuffle + "'");
-
-                    int applied = 0;
-                    foreach (var rm in rf.moves)
-                    {
-                        var mk = (MoveKind)Enum.Parse(typeof(MoveKind), rm.kind, true);
-                        var m = new Move(mk, rm.from, rm.to, rm.count);
-                        s = (FreeCellState)s.Apply(m);
-                        applied++;
-                    }
-
-                    _fc = s;
-                    _currentSeed = rf.seed;
-                    _currentConfig = cfg;
-                    _log = rf.moves.Select(rm =>
-                        new Move((MoveKind)Enum.Parse(typeof(MoveKind), rm.kind, true), rm.from, rm.to, rm.count)
-                    ).ToList();
-
-                    Console.WriteLine("[Loaded] " + path + " | moves=" + applied);
-                    DumpFreeCell(_fc);
-                    break;
-                }
                 case "replay-info":
-                {
-                    if (args.Count < 2) { Console.WriteLine("Usage: replay-info <path.json>"); return; }
-                    var rf = ReadReplay(args[1]);
-                    Console.WriteLine("gameId=" + rf.gameId + "  version=" + rf.version + "  seed=" + rf.seed);
-                    Console.WriteLine("config: cells=" + rf.config.cells + " foundations=" + rf.config.foundations + " tableaus=" + rf.config.tableaus + " sequence=" + rf.config.allowSequenceMoves);
-                    Console.WriteLine("moves=" + (rf.moves != null ? rf.moves.Count : 0));
-                    Console.WriteLine("createdAt=" + (rf.createdAt ?? ""));
-                    Console.WriteLine("tags=[" + string.Join(",", rf.tags ?? new List<string>()) + "]");
-                    Console.WriteLine("notes=" + (rf.notes ?? ""));
-                    Console.WriteLine("metadata: " + (rf.metadata != null ? string.Join(", ", rf.metadata.Select(kv => kv.Key + "=" + kv.Value)) : ""));
-                    break;
-                }
+                    {
+                        if (args.Count < 2) { Console.WriteLine("Usage: replay-info <path.json>"); return; }
+                        var rf = ReadReplay(args[1]);
+                        Console.WriteLine("gameId=" + rf.gameId + "  version=" + rf.version + "  seed=" + rf.seed);
+                        Console.WriteLine("config: cells=" + rf.config.cells + " foundations=" + rf.config.foundations + " tableaus=" + rf.config.tableaus + " sequence=" + rf.config.allowSequenceMoves);
+                        Console.WriteLine("moves=" + (rf.moves != null ? rf.moves.Count : 0));
+                        Console.WriteLine("createdAt=" + (rf.createdAt ?? ""));
+                        Console.WriteLine("tags=[" + string.Join(",", rf.tags ?? new List<string>()) + "]");
+                        Console.WriteLine("notes=" + (rf.notes ?? ""));
+                        Console.WriteLine("metadata: " + (rf.metadata != null ? string.Join(", ", rf.metadata.Select(kv => kv.Key + "=" + kv.Value)) : ""));
+                        break;
+                    }
                 case "replay-diff":
-                {
-                    if (args.Count < 3) { Console.WriteLine("Usage: replay-diff <a.json> <b.json>"); return; }
-                    var a = ReadReplay(args[1]);
-                    var b = ReadReplay(args[2]);
+                    {
+                        if (args.Count < 3) { Console.WriteLine("Usage: replay-diff <a.json> <b.json>"); return; }
+                        var a = ReadReplay(args[1]);
+                        var b = ReadReplay(args[2]);
 
-                    Console.WriteLine("== Summary ==");
-                    Console.WriteLine("seed: " + a.seed + " vs " + b.seed + (a.seed == b.seed ? " (same)" : " (DIFF)"));
-                    Console.WriteLine("sequence-enabled: " + a.config.allowSequenceMoves + " vs " + b.config.allowSequenceMoves + (a.config.allowSequenceMoves == b.config.allowSequenceMoves ? " (same)" : " (DIFF)"));
-                    Console.WriteLine("cells/foundations/tableaus: " + a.config.cells + "/" + a.config.foundations + "/" + a.config.tableaus +
-                                      " vs " + b.config.cells + "/" + b.config.foundations + "/" + b.config.tableaus +
-                                      ((a.config.cells==b.config.cells && a.config.foundations==b.config.foundations && a.config.tableaus==b.config.tableaus) ? " (same)" : " (DIFF)"));
-                    int ac = a.moves != null ? a.moves.Count : 0;
-                    int bc = b.moves != null ? b.moves.Count : 0;
-                    Console.WriteLine("move count: " + ac + " vs " + bc + (ac == bc ? " (same)" : " (DIFF)"));
+                        Console.WriteLine("== Summary ==");
+                        Console.WriteLine("seed: " + a.seed + " vs " + b.seed + (a.seed == b.seed ? " (same)" : " (DIFF)"));
+                        Console.WriteLine("sequence-enabled: " + a.config.allowSequenceMoves + " vs " + b.config.allowSequenceMoves + (a.config.allowSequenceMoves == b.config.allowSequenceMoves ? " (same)" : " (DIFF)"));
+                        Console.WriteLine("cells/foundations/tableaus: " + a.config.cells + "/" + a.config.foundations + "/" + a.config.tableaus +
+                                          " vs " + b.config.cells + "/" + b.config.foundations + "/" + b.config.tableaus +
+                                          ((a.config.cells == b.config.cells && a.config.foundations == b.config.foundations && a.config.tableaus == b.config.tableaus) ? " (same)" : " (DIFF)"));
+                        int ac = a.moves != null ? a.moves.Count : 0;
+                        int bc = b.moves != null ? b.moves.Count : 0;
+                        Console.WriteLine("move count: " + ac + " vs " + bc + (ac == bc ? " (same)" : " (DIFF)"));
 
-                    int minc = Math.Min(ac, bc);
-                    int idx = -1;
-                    for (int i = 0; i < minc; i++)
-                    {
-                        var am = a.moves[i]; var bm = b.moves[i];
-                        if (!(am.kind == bm.kind && am.from == bm.from && am.to == bm.to && am.count == bm.count))
-                        { idx = i; break; }
+                        int minc = Math.Min(ac, bc);
+                        int idx = -1;
+                        for (int i = 0; i < minc; i++)
+                        {
+                            var am = a.moves[i]; var bm = b.moves[i];
+                            if (!(am.kind == bm.kind && am.from == bm.from && am.to == bm.to && am.count == bm.count))
+                            { idx = i; break; }
+                        }
+                        if (idx == -1)
+                        {
+                            if (ac == bc) Console.WriteLine("first diff: none (identical move sequences)");
+                            else Console.WriteLine("first diff: at " + minc + " (one file has extra moves)");
+                        }
+                        else
+                        {
+                            Console.WriteLine("first diff @ " + idx + ":");
+                            Console.WriteLine("  A: " + a.moves[idx].kind + " " + a.moves[idx].from + "->" + a.moves[idx].to + " x" + a.moves[idx].count);
+                            Console.WriteLine("  B: " + b.moves[idx].kind + " " + b.moves[idx].from + "->" + b.moves[idx].to + " x" + b.moves[idx].count);
+                        }
+                        break;
                     }
-                    if (idx == -1)
-                    {
-                        if (ac == bc) Console.WriteLine("first diff: none (identical move sequences)");
-                        else Console.WriteLine("first diff: at " + minc + " (one file has extra moves)");
-                    }
-                    else
-                    {
-                        Console.WriteLine("first diff @ " + idx + ":");
-                        Console.WriteLine("  A: " + a.moves[idx].kind + " " + a.moves[idx].from + "->" + a.moves[idx].to + " x" + a.moves[idx].count);
-                        Console.WriteLine("  B: " + b.moves[idx].kind + " " + b.moves[idx].from + "->" + b.moves[idx].to + " x" + b.moves[idx].count);
-                    }
-                    break;
-                }
                 case "hint":
-                {
-                    EnsureFc();
-                    int topN = 5;
-                    if (args.Count >= 2) int.TryParse(args[1], out topN);
-                    var scored = ScoreMoves(_fc).OrderByDescending(x => x.score).Take(topN).ToList();
-                    if (scored.Count == 0) { Console.WriteLine("(no legal moves)"); break; }
-                    for (int i = 0; i < scored.Count; i++)
                     {
-                        var s = scored[i];
-                        Console.WriteLine((i+1).ToString() + ". " + s.move.ToString() + "  score=" + s.score + "  " + s.reason);
+                        EnsureFc();
+                        int topN = 5;
+                        if (args.Count >= 2) int.TryParse(args[1], out topN);
+                        var scored = ScoreMoves(_fc).OrderByDescending(x => x.score).Take(topN).ToList();
+                        if (scored.Count == 0) { Console.WriteLine("(no legal moves)"); break; }
+                        for (int i = 0; i < scored.Count; i++)
+                        {
+                            var s = scored[i];
+                            Console.WriteLine((i + 1).ToString() + ". " + s.move.ToString() + "  score=" + s.score + "  " + s.reason);
+                        }
+                        break;
                     }
-                    break;
-                }
                 case "auto-foundation":
-                {
-                    EnsureFc();
-                    int applied = 0;
-                    while (true)
                     {
-                        var move = _fc.GetLegalMoves().FirstOrDefault(m =>
-                            m.Kind == MoveKind.TableauToFoundation || m.Kind == MoveKind.CellToFoundation);
-                        if (move.Kind == 0 && move.From == 0 && move.To == 0 && move.Count == 0) break;
-                        _fc = (FreeCellState)_fc.Apply(move);
-                        _log.Add(move);
-                        applied++;
+                        EnsureFc();
+                        int applied = 0;
+                        while (true)
+                        {
+                            var move = _fc.GetLegalMoves().FirstOrDefault(m =>
+                                m.Kind == MoveKind.TableauToFoundation || m.Kind == MoveKind.CellToFoundation);
+                            if (move.Kind == 0 && move.From == 0 && move.To == 0 && move.Count == 0) break;
+                            _fc = (FreeCellState)_fc.Apply(move);
+                            _log.Add(move);
+                            _steps.Add(new ReplayMove
+                            {
+                                kind = "move",
+                                op = Enum.GetName(typeof(MoveKind), move.Kind) ?? "TableauToFoundation",
+                                from = move.From,
+                                to = move.To,
+                                count = move.Count
+                            });
+                            applied++;
+                        }
+                        Console.WriteLine("[Auto] foundation moves applied: " + applied);
+                        RecalcVictoryAndAnnounce(_fc);
+                        DumpFreeCell(_fc);
+                        break;
                     }
-                    Console.WriteLine("[Auto] foundation moves applied: " + applied);
-                    DumpFreeCell(_fc);
-                    break;
-                }
                 case "undo":
-                {
-                    EnsureFc();
-                    int n = 1;
-                    if (args.Count >= 2) int.TryParse(args[1], out n);
-                    if (n < 1) n = 1;
-                    if (_log.Count == 0) { Console.WriteLine("[Undo] nothing to undo."); break; }
-                    if (n > _log.Count) n = _log.Count;
+                    {
+                        EnsureFc();
+                        int n = 1;
+                        if (args.Count >= 2) int.TryParse(args[1], out n);
+                        if (n < 1) n = 1;
 
-                    _log.RemoveRange(_log.Count - n, n);
-                    var s2 = FreeCellState.NewGame(_currentSeed, _currentConfig);
-                    foreach (var m in _log) s2 = (FreeCellState)s2.Apply(m);
-                    _fc = s2;
-                    Console.WriteLine("[Undo] reverted " + n + " move(s).");
-                    DumpFreeCell(_fc);
-                    break;
-                }
+                        // 현재 타임라인에서 move step 개수 계산
+                        int moveCount = 0;
+                        for (int i = 0; i < _steps.Count; i++)
+                            if (IsMoveStep(_steps[i])) moveCount++;
+
+                        if (moveCount == 0)
+                        {
+                            // 무브가 하나도 안 남았으면, 꼬리에 붙은 '아이템 스텝( temp/grab/siphon )'을 1개 되돌린다.
+                            if (_steps.Count > 0 && IsAnyItemStep(_steps[_steps.Count - 1]))
+                            {
+                                var last = _steps[_steps.Count - 1];
+                                _steps.RemoveAt(_steps.Count - 1);
+                                Console.WriteLine("[Undo] reverted item: " + (last.op ?? last.kind));
+                                // 아래의 재빌드 로직으로 이어서 타임라인을 다시 적용
+                            }
+                            else
+                            {
+                                Console.WriteLine("[Undo] nothing to undo.");
+                                break;
+                            }
+                        }
+                        if (n > moveCount) n = moveCount;
+
+                        // 끝에서부터 move step n개 제거
+                        int removed = 0;
+                        for (int i = _steps.Count - 1; i >= 0 && removed < n; i--)
+                        {
+                            if (IsMoveStep(_steps[i]))
+                            {
+                                _steps.RemoveAt(i);
+                                removed++;
+                            }
+                        }
+
+                        // If the tail is now a Temp activation with no following moves, pop it too.
+                        int poppedTailItems = 0;
+                        while (_steps.Count > 0 && IsAnyItemStep(_steps[_steps.Count - 1]))
+                        {
+                            var last = _steps[_steps.Count - 1];
+                            _steps.RemoveAt(_steps.Count - 1);
+                            poppedTailItems++;
+                            Console.WriteLine("[Undo] also reverted item: " + (last.op ?? last.kind));
+                        }
+
+                        // 베이스에서 다시 빌드 (seed-baseline 우선)
+                        if (_baseIsSeed)
+                        {
+                            _fc = FreeCellState.NewGame(_baseSeed, _baseConfig, _baseShuffleKind);
+                            _log.Clear();
+                            _tempActive = false;
+                            _tempEverHeld = false;
+                            _tempCharges = _baseTempCharges;
+                            _grabCharges = _baseGrabCharges;
+                            _siphonCharges = _baseSiphonCharges;
+                        }
+                        else if (_baseIsSnapshot && _baseSnapshot != null)
+                        {
+                            _fc = BuildFromSnapshot(_currentSeed, _currentConfig, _baseSnapshot);
+                            _log.Clear();
+                            _tempEverHeld = false;
+                        }
+                        else
+                        {
+                            // 비상용: 현재 상태를 베이스 스냅샷으로 잡고 거기서 시작
+                            _baseIsSnapshot = true;
+                            _baseSnapshot = MakeSnapshot(_fc);
+                            _fc = BuildFromSnapshot(_currentSeed, _currentConfig, _baseSnapshot);
+                            _log.Clear();
+                            _tempEverHeld = false;
+                        }
+
+                        for (int i = 0; i < _steps.Count; i++)
+                        {
+                            var step = _steps[i];
+                            if (TryParseMoveFromReplay(step, out var mv))
+                            {
+                                bool usedTempCapacity = TempCapacityNeeded(_fc, mv);
+                                _fc = (FreeCellState)_fc.Apply(mv);
+                                _log.Add(mv);
+
+                                if (_tempActive && _fc.Cells.Length > _tempCellIndex && _fc.Cells[_tempCellIndex].HasValue)
+                                    _tempEverHeld = true;
+
+                                MaybeCloseTempCell(usedTempCapacity);
+                            }
+                            else if (string.Equals(step.kind, "item", StringComparison.OrdinalIgnoreCase))
+                            {
+                                bool ok = ApplyReplayItem(step);
+                                if (!ok)
+                                {
+                                    Console.WriteLine("[Undo] failed to re-apply item step: " + (step.op ?? step.kind));
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine("[Undo] unknown step kind encountered; stopping reapply.");
+                                break;
+                            }
+                        }
+
+                        RecalcVictoryAndAnnounce(_fc);
+                        Console.WriteLine("[Undo] reverted " + removed + " move(s).");
+                        DumpFreeCell(_fc);
+                        break;
+                    }
                 case "board":
-                {
-                    EnsureFc();
-                    DumpFreeCell(_fc);
-                    break;
-                }
+                    {
+                        EnsureFc();
+                        DumpFreeCell(_fc);
+                        break;
+                    }
                 case "pretty":
-                {
-                    if (args.Count < 2) { Console.WriteLine("pretty is " + (_pretty ? "ON" : "OFF")); break; }
-                    var opt = args[1].ToLowerInvariant();
-                    if (opt == "on") { _pretty = true; Console.WriteLine("[pretty] ON"); }
-                    else if (opt == "off") { _pretty = false; Console.WriteLine("[pretty] OFF"); }
-                    else Console.WriteLine("Usage: pretty on|off");
-                    break;
-                }
+                    {
+                        if (args.Count < 2) { Console.WriteLine("pretty is " + (_pretty ? "ON" : "OFF")); break; }
+                        var opt = args[1].ToLowerInvariant();
+                        if (opt == "on") { _pretty = true; Console.WriteLine("[pretty] ON"); }
+                        else if (opt == "off") { _pretty = false; Console.WriteLine("[pretty] OFF"); }
+                        else Console.WriteLine("Usage: pretty on|off");
+                        break;
+                    }
                 case "help":
                     Help();
                     break;
@@ -471,183 +793,53 @@ namespace Solitaire.Cli
             }
         }
 
-        // ---- Foundation "pop" via rewind & branch ----
-        static void FoundationPop(string destType, int foundationIndex, int destIndex)
+        // ===== Utility kept here =====
+
+        // 세션 시작 시점 상태를 스냅샷으로 캡처해서 undo의 베이스로 사용
+        static void SetSessionBaseToCurrent()
         {
-            if (_fc == null) throw new InvalidOperationException("No FreeCell game.");
-            if (foundationIndex < 0 || foundationIndex > 3) throw new ArgumentOutOfRangeException(nameof(foundationIndex));
-            if (destType == "t")
-            {
-                if (destIndex < 0 || destIndex >= _currentConfig.Tableaus) throw new ArgumentOutOfRangeException(nameof(destIndex));
-            }
-            else if (destType == "c")
-            {
-                if (destIndex < 0 || (_fc != null && (destIndex >= _fc.Cells.Length))) throw new ArgumentOutOfRangeException(nameof(destIndex));
-            }
-            else throw new ArgumentException("destType must be 't' or 'c'");
-
-            var topRank = _fc.FoundationTop[foundationIndex];
-            if (topRank == 0)
-            {
-                Console.WriteLine("[F-POP] Foundation " + foundationIndex + " is empty.");
-                return;
-            }
-
-            // find last move that placed to this foundation
-            int idx = -1;
-            for (int i = _log.Count - 1; i >= 0; i--)
-            {
-                var m = _log[i];
-                if ((m.Kind == MoveKind.TableauToFoundation || m.Kind == MoveKind.CellToFoundation) && m.To == foundationIndex)
-                {
-                    idx = i; break;
-                }
-            }
-            if (idx < 0)
-            {
-                Console.WriteLine("[F-POP] Can't locate the move that placed the current top on foundation " + foundationIndex + ". It might come from a previous session.");
-                return;
-            }
-
-            // Rebuild up to idx (exclusive)
-            var s2 = FreeCellState.NewGame(_currentSeed, _currentConfig);
-            for (int i = 0; i < idx; i++) s2 = (FreeCellState)s2.Apply(_log[i]);
-            var placingMove = _log[idx];
-
-            // Build branch move candidate
-            Move? branch = null;
-            if (destType == "t")
-            {
-                if (placingMove.Kind == MoveKind.TableauToFoundation)
-                    branch = new Move(MoveKind.TableauToTableau, placingMove.From, destIndex, 1);
-                else // from cell
-                    branch = new Move(MoveKind.CellToTableau, placingMove.From, destIndex, 1);
-            }
-            else // destType == "c"
-            {
-                if (placingMove.Kind == MoveKind.TableauToFoundation)
-                    branch = new Move(MoveKind.TableauToCell, placingMove.From, destIndex, 1);
-                else
-                {
-                    if (placingMove.From != destIndex)
-                    {
-                        Console.WriteLine("[F-POP] The card originally came from cell " + placingMove.From + ". Can only return to the same cell.");
-                        return;
-                    }
-                    branch = null; // no-op; rewind already places it there
-                }
-            }
-
-            // Validate legality before mutating state/log
-            if (branch.HasValue)
-            {
-                bool legal = s2.GetLegalMoves().Any(m => m.Kind == branch.Value.Kind && m.From == branch.Value.From && m.To == branch.Value.To && m.Count == branch.Value.Count);
-                if (!legal)
-                {
-                    Console.WriteLine("[F-POP] Illegal branch move at that point in history: " + branch.Value.ToString());
-                    return;
-                }
-            }
-
-            int dropped = _log.Count - idx; // idx..end will be discarded
-            _log.RemoveRange(idx, dropped);
-            _fc = s2;
-            if (branch.HasValue)
-            {
-                _fc = (FreeCellState)_fc.Apply(branch.Value);
-                _log.Add(branch.Value);
-            }
-
-            Console.WriteLine("[F-POP] Rewound " + dropped + " move(s) and branched " + (branch.HasValue ? "with: " + branch.Value.ToString() : "(no-op to original cell)"));
-            DumpFreeCell(_fc);
+            _baseIsSnapshot = true;
+            _baseIsSeed = false;
+            _baseSnapshot = MakeSnapshot(_fc);
+            // Start a fresh timeline from this baseline so undo only affects post-baseline steps
+            _log.Clear();
+            _steps.Clear();
         }
 
-        // ---- Parse move kind with aliases ----
-        static MoveKind ParseMoveKind(string token)
+        static (int temp, int grab, int siphon) CountItemUses(IList<ReplayMove> steps)
         {
-            string t = token.Trim();
-            if (Enum.TryParse<MoveKind>(t, true, out var mk))
+            int t = 0, g = 0, s = 0;
+            if (steps == null) return (0,0,0);
+            for (int i = 0; i < steps.Count; i++)
             {
-                return mk;
+                var x = steps[i];
+                if (!string.Equals(x.kind, "item", StringComparison.OrdinalIgnoreCase)) continue;
+                var op = (x.op ?? string.Empty).ToLowerInvariant();
+                if (op == "temp") t++;
+                else if (op == "grab") g++;
+                else if (op == "siphon") s++;
             }
-            switch (t.ToLowerInvariant())
-            {
-                case "t2t": return MoveKind.TableauToTableau;
-                case "t2c": return MoveKind.TableauToCell;
-                case "c2t": return MoveKind.CellToTableau;
-                case "t2f": return MoveKind.TableauToFoundation;
-                case "c2f": return MoveKind.CellToFoundation;
-                case "f2t": return MoveKind.FoundationToTableau;
-                case "f2c": return MoveKind.FoundationToCell;
-            }
-            throw new ArgumentException("Unknown move kind: " + token + " (try: t2t, t2c, c2t, t2f, c2f, f2t, f2c)");
+            return (t, g, s);
         }
 
-        struct ScoredMove { public Move move; public int score; public string reason; }
-        static IEnumerable<ScoredMove> ScoreMoves(FreeCellState s)
+        static void SetSessionBaseToSeed(uint seed, FreeCellConfig cfg, string shuffleKind, IList<ReplayMove> steps, int currentTempCharges, int currentGrabCharges, int currentSiphonCharges)
         {
-            foreach (var m in s.GetLegalMoves())
-            {
-                int score = 0;
-                var reasons = new List<string>();
-                Card topCard;
-                int srcCount;
-                bool destEmpty;
-                switch (m.Kind)
-                {
-                    case MoveKind.TableauToFoundation:
-                        topCard = s.Tableaus[m.From][s.Tableaus[m.From].Count - 1];
-                        score += 1000; reasons.Add("to-foundation");
-                        score += (int)topCard.Rank;
-                        break;
-                    case MoveKind.CellToFoundation:
-                        topCard = s.Cells[m.From].Value;
-                        score += 1100; reasons.Add("from-cell-to-foundation");
-                        score += (int)topCard.Rank;
-                        break;
-                    case MoveKind.TableauToCell:
-                        srcCount = s.Tableaus[m.From].Count;
-                        score -= 200; reasons.Add("fills-cell");
-                        if (srcCount == 1) { score += 300; reasons.Add("frees-tableau"); }
-                        break;
-                    case MoveKind.CellToTableau:
-                        score += 200; reasons.Add("empties-cell");
-                        destEmpty = s.Tableaus[m.To].Count == 0;
-                        if (destEmpty) { score += 120; reasons.Add("to-empty-tableau"); }
-                        else { score += 60; reasons.Add("builds-sequence"); }
-                        break;
-                    case MoveKind.TableauToTableau:
-                        destEmpty = s.Tableaus[m.To].Count == 0;
-                        srcCount = s.Tableaus[m.From].Count;
-                        score += 220; reasons.Add("build");
-                        if (m.Count > 1) { score += 50 * (m.Count - 1); reasons.Add("sequence x" + m.Count); }
-                        if (destEmpty) { score += 150; reasons.Add("to-empty-tableau"); }
-                        if (srcCount == m.Count) { score += 300; reasons.Add("frees-tableau"); }
-                        break;
-                }
-                yield return new ScoredMove { move = m, score = score, reason = string.Join(",", reasons) };
-            }
-        }
+            _baseIsSnapshot = false;
+            _baseIsSeed = true;
+            _baseSeed = seed;
+            _baseConfig = cfg;
+            _baseShuffleKind = string.IsNullOrEmpty(shuffleKind) ? "xor" : shuffleKind;
 
-        static ReplayFile ReadReplay(string path)
-        {
-            var json = File.ReadAllText(path);
-            var rf = JsonSerializer.Deserialize<ReplayFile>(json);
-            if (rf == null) throw new InvalidOperationException("Invalid replay file.");
-            if (rf.gameId != "FreeCell") throw new InvalidOperationException("Unsupported gameId: " + rf.gameId);
-            if (rf.version != 1) throw new InvalidOperationException("Unsupported version: " + rf.version);
-            if (rf.config == null) rf.config = new ReplayConfig();
-            if (rf.moves == null) rf.moves = new List<ReplayMove>();
-            if (rf.tags == null) rf.tags = new List<string>();
-            if (rf.metadata == null) rf.metadata = new Dictionary<string,string>();
-            if (rf.createdAt == null) rf.createdAt = "";
-            if (rf.notes == null) rf.notes = "";
-            return rf;
+            var (usedTemp, usedGrab, usedSiphon) = CountItemUses(steps);
+            _baseTempCharges = currentTempCharges + usedTemp;
+            _baseGrabCharges = currentGrabCharges + usedGrab;
+            _baseSiphonCharges = currentSiphonCharges + usedSiphon;
+            // 주의: seed 베이스에서는 타임라인을 비우지 않는다. undo는 이 타임라인을 기준으로 되돌림.
         }
 
         static void Help()
         {
-            Console.WriteLine($"Solitaire CLI v{CliInfo.Version()}");
+            Console.WriteLine("Solitaire CLI v" + CliInfo.Version());
             Console.WriteLine("Commands:");
             Console.WriteLine("  repl                         Start interactive session");
             Console.WriteLine("  fc-new --seed <u32>          Start a new FreeCell game");
@@ -657,22 +849,29 @@ namespace Solitaire.Cli
             Console.WriteLine("  fc-f2t <fIdx> <tIdx>         Move from Foundation(fIdx) back to Tableau(tIdx) via rewind+branch");
             Console.WriteLine("  fc-f2c <fIdx> <cIdx>         Move from Foundation(fIdx) back to Cell(cIdx) via rewind+branch");
             Console.WriteLine("  items [show]                 Show item status");
-            Console.WriteLine("  items set temp <n> [grab <n>]  Set item charges");
+            Console.WriteLine("  items set temp <n> [grab <n>] [siphon <n>]  Set item charges");
             Console.WriteLine("  use-temp                     Activate temporary cell (consumes 1 charge)");
-            Console.WriteLine("  grab <t> <depthFromTop>      Pull that card to top of tableau t (consumes 1 charge)");
+            Console.WriteLine("  grab <t> <depth>             Pull that card to top of tableau t (consumes 1 charge)");
+            Console.WriteLine("  siphon <s|h|d|c|rand>        Pull next-needed suit card from anywhere to foundation (consumes 1 charge)");
             Console.WriteLine("  save <path.json> [--note \"text\"] [--tag a,b,c]  Save current game as replay JSON");
-            Console.WriteLine("  replay <path.json> [--until N]  Replay file (apply first N moves)");
+            Console.WriteLine("  replay <path.json> [--until N]  Replay file (apply first N steps)");
             Console.WriteLine("  load <path.json>             Load file and set current state to result");
             Console.WriteLine("  replay-info <path.json>      Show metadata/config/move count");
             Console.WriteLine("  replay-diff <a.json> <b.json>  Compare two replay files");
             Console.WriteLine("  hint [N]                     Show top-N suggested moves with scores");
             Console.WriteLine("  auto-foundation              Auto-apply all legal moves to foundations");
-            Console.WriteLine("  undo [N]                     Undo last N moves (rebuilds from seed)");
+            Console.WriteLine("  undo [N]                     Undo last N moves (since baseline snapshot)");
             Console.WriteLine("  board                        Print current board");
             Console.WriteLine("  pretty on|off                Toggle ANSI colored board rendering (default ON)");
             Console.WriteLine();
             Console.WriteLine("Index notes:");
             Console.WriteLine("  Tableaus: 0..7  | Cells: 0..3 (temp slot index is 4 when active) | Foundations(suit index): 0=Spade,1=Heart,2=Diamond,3=Club");
+        }
+
+        static void ShowItems()
+        {
+            Console.WriteLine("Items: TempCell " + (_tempActive ? "ACTIVE" : "INACTIVE") + " (idx " + _tempCellIndex + "), charges=" + _tempCharges +
+                              " | Grab charges=" + _grabCharges + " | Siphon charges=" + _siphonCharges);
         }
 
         static void EnsureFc()
@@ -684,175 +883,17 @@ namespace Solitaire.Cli
         {
             if (_pretty) { DumpBoardPretty(s); return; }
 
-            var cellsStrList = new List<string>();
-            for (int ci = 0; ci < s.Cells.Length; ci++)
-            {
-                bool usable = (ci < _currentConfig.Cells) || (ci == s.TempCellSlotIndex && s.TempCellActive);
-                var token = s.Cells[ci].HasValue ? s.Cells[ci].Value.ToString() : (usable ? "--" : "xx");
-                cellsStrList.Add(token);
-            }
-            var cellsStr = string.Join(", ", cellsStrList);
+            var cellsStr = string.Join(", ", s.Cells.Select(c => c.HasValue ? c.Value.ToString() : "-"));
             Console.WriteLine("Moves=" + s.MoveCount
                               + "  Foundations=" + string.Join(",", s.FoundationTop)
                               + "  Cells=[" + cellsStr + "]");
-            Console.WriteLine("Items: " + s.ItemsStatusString());
             for (int i = 0; i < s.Tableaus.Length; i++)
             {
                 var t = s.Tableaus[i];
                 Console.WriteLine("T" + i + ": " + string.Join(" | ", t.Select(c => c.ToString())));
             }
-        }
-
-        // ===== Alignment helpers (ANSI-aware) =====
-        static int VisibleLen(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return 0;
-            int len = 0;
-            for (int i = 0; i < s.Length; i++)
-            {
-                char c = s[i];
-                if (c == '\x1b' && i + 1 < s.Length && s[i + 1] == '[')
-                {
-                    int j = i + 2;
-                    while (j < s.Length && (char.IsDigit(s[j]) || s[j] == ';')) j++;
-                    if (j < s.Length && s[j] == 'm') { i = j; continue; }
-                }
-                len++;
-            }
-            return len;
-        }
-
-        static string RightPadVisible(string s, int width)
-        {
-            int v = VisibleLen(s);
-            if (v >= width) return s;
-            return s + new string(' ', width - v);
-        }
-
-        // --- Pretty board (ANSI) ---
-        static void DumpBoardPretty(FreeCellState s)
-        {
-            const int CW = 4; // column cell width (visible)
-            string Reset = "\x1b[0m";
-            string Red = "\x1b[31m";
-            string Bold = "\x1b[1m";
-
-            Console.WriteLine(Bold + "Moves=" + s.MoveCount + Reset);
-
-            // Foundations
-            var suits = new [] { Suit.Spade, Suit.Heart, Suit.Diamond, Suit.Club };
-            var sb = new StringBuilder();
-            sb.Append("Foundations: ");
-            for (int i = 0; i < 4; i++)
-            {
-                var rank = s.FoundationTop[i];
-                string name = rank == 0 ? "-" : RankShort((Rank)rank);
-                string suit = SuitSymbol(suits[i]);
-                bool red = (suits[i] == Suit.Heart || suits[i] == Suit.Diamond);
-                sb.Append("[" + (red ? Red : "") + suit + Reset + ":" + name + "] ");
-            }
-            Console.WriteLine(sb.ToString());
-
-            // Cells: render normal 0..Cells-1; temp slot shows "--" when active, "xx" when inactive
-            var csb = new StringBuilder();
-            csb.Append("Cells: ");
-            for (int i = 0; i < s.Cells.Length; i++)
-            {
-                bool usable = (i < _currentConfig.Cells) || (i == s.TempCellSlotIndex && s.TempCellActive);
-                string token = s.Cells[i].HasValue ? RenderCardShort(s.Cells[i].Value, true) : (usable ? "--" : "xx");
-                csb.Append(RightPadVisible(token, CW) + "  ");
-            }
-            Console.WriteLine(csb.ToString());
-
-            // Items line
-            Console.WriteLine("Items: " + s.ItemsStatusString());
-
-            // Tableaus header
-            var hb = new StringBuilder();
-            for (int col = 0; col < s.Tableaus.Length; col++)
-            {
-                string label = "T" + col;
-                hb.Append("  " + RightPadVisible(label, CW));
-            }
-            Console.WriteLine(Bold + hb.ToString() + Reset);
-
-            // Find max height
-            int maxH = 0;
-            for (int i = 0; i < s.Tableaus.Length; i++) if (s.Tableaus[i].Count > maxH) maxH = s.Tableaus[i].Count;
-
-            // Print rows TOP-aligned, showing bottom->top within each column
-            for (int r = 0; r < maxH; r++)
-            {
-                var line = new StringBuilder();
-                for (int col = 0; col < s.Tableaus.Length; col++)
-                {
-                    var pile = s.Tableaus[col];
-                    int idx = r; // 0=bottom card
-                    string cell = (idx < pile.Count) ? RenderCardShort(pile[idx], true) : "";
-                    line.Append("  " + RightPadVisible(cell, CW));
-                }
-                Console.WriteLine(line.ToString());
-            }
-        }
-
-        static string RenderCardShort(Card c, bool ansi)
-        {
-            string suit = SuitSymbol(c.Suit);
-            string r = RankShort(c.Rank);
-            bool red = (c.Suit == Suit.Heart || c.Suit == Suit.Diamond);
-            string Reset = "\x1b[0m";
-            string Red = "\x1b[31m";
-            if (ansi && red) return Red + r + suit + Reset;
-            return r + suit;
-        }
-
-        static string SuitSymbol(Suit s)
-        {
-            switch (s)
-            {
-                case Suit.Spade: return "♠";
-                case Suit.Heart: return "♥";
-                case Suit.Diamond: return "♦";
-                case Suit.Club: return "♣";
-            }
-            return "?";
-        }
-
-        static string RankShort(Rank r)
-        {
-            int v = (int)r;
-            if (v == 1) return "A";
-            if (v >= 2 && v <= 10) return v.ToString();
-            if (v == 11) return "J";
-            if (v == 12) return "Q";
-            if (v == 13) return "K";
-            return "?";
-        }
-
-        static IEnumerable<string> SplitArgs(string commandLine)
-        {
-            if (string.IsNullOrEmpty(commandLine)) yield break;
-            int i = 0;
-            while (i < commandLine.Length)
-            {
-                while (i < commandLine.Length && char.IsWhiteSpace(commandLine[i])) i++;
-                if (i >= commandLine.Length) yield break;
-
-                if (commandLine[i] == '\"')
-                {
-                    i++;
-                    int start = i;
-                    while (i < commandLine.Length && commandLine[i] != '\"') i++;
-                    yield return commandLine.Substring(start, i - start);
-                    if (i < commandLine.Length && commandLine[i] == '\"') i++;
-                }
-                else
-                {
-                    int start = i;
-                    while (i < commandLine.Length && !char.IsWhiteSpace(commandLine[i])) i++;
-                    yield return commandLine.Substring(start, i - start);
-                }
-            }
+            ShowItems();
         }
     }
 }
+        

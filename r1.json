@@ -1,0 +1,592 @@
+{
+  "version": 1,
+  "gameId": "FreeCell",
+  "seed": 1,
+  "config": {
+    "cells": 4,
+    "foundations": 4,
+    "tableaus": 8,
+    "allowSequenceMoves": true
+  },
+  "moves": [
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 0,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 1,
+      "to": 1,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 0,
+      "to": 6,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 2,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 2,
+      "to": 1,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 2,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 1,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 6,
+      "to": 2,
+      "count": 2,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 0,
+      "to": 6,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 0,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 0,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToTableau",
+      "from": 1,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 5,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 3,
+      "to": 6,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 5,
+      "to": 1,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 5,
+      "to": 6,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 1,
+      "to": 5,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToTableau",
+      "from": 0,
+      "to": 6,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 0,
+      "to": 1,
+      "count": 2,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 0,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 5,
+      "to": 0,
+      "count": 2,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 5,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 5,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 1,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToTableau",
+      "from": 0,
+      "to": 5,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToTableau",
+      "from": 3,
+      "to": 5,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 3,
+      "to": 1,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 3,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 3,
+      "to": 7,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 7,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 7,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 7,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 7,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 7,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 7,
+      "to": 5,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToTableau",
+      "from": 1,
+      "to": 5,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 7,
+      "to": 1,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToTableau",
+      "from": 3,
+      "to": 7,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToTableau",
+      "from": 1,
+      "to": 7,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 1,
+      "to": 2,
+      "count": 3,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 1,
+      "to": 1,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 1,
+      "to": 1,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 1,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 4,
+      "to": 1,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToFoundation",
+      "from": 2,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 3,
+      "to": 1,
+      "count": 2,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 3,
+      "to": 6,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 3,
+      "to": 5,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToTableau",
+      "from": 0,
+      "to": 5,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToTableau",
+      "from": 1,
+      "to": 5,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 2,
+      "to": 5,
+      "count": 4,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 4,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 4,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 3,
+      "to": 1,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 4,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 5,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 5,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToCell",
+      "from": 4,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 4,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToFoundation",
+      "from": 5,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 3,
+      "to": 5,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 6,
+      "to": 1,
+      "count": 6,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 6,
+      "to": 7,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 6,
+      "to": 2,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 6,
+      "to": 0,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "CellToTableau",
+      "from": 0,
+      "to": 3,
+      "count": 1,
+      "arg": 0
+    },
+    {
+      "kind": "move",
+      "op": "TableauToTableau",
+      "from": 2,
+      "to": 3,
+      "count": 7,
+      "arg": 0
+    }
+  ],
+  "createdAt": "2025-10-17T09:49:29.6569320\u002B09:00",
+  "notes": "",
+  "tags": [],
+  "metadata": {
+    "cli": "Solitaire.Cli",
+    "cliVersion": "1",
+    "os": "Unix 15.6.1",
+    "items.temp.active": "0",
+    "items.temp.charges": "0",
+    "items.grab.charges": "0",
+    "items.siphon.charges": "0",
+    "game.finished": "0"
+  },
+  "snapshot": {
+    "tableaus": [
+      "kdqsjdts",
+      "khqcjhtc9h8s7h6s",
+      "6c5d5h",
+      "kcqdjcth9s8h7s6h",
+      "",
+      "ksqhjstd9c8d7c6d5s",
+      "4s",
+      "9d8c7d"
+    ],
+    "cells": [
+      "",
+      "",
+      "",
+      ""
+    ],
+    "foundations": [
+      "3s",
+      "4h",
+      "4d",
+      "5c"
+    ],
+    "moveCount": 67,
+    "tempActive": false,
+    "tempCellIndex": 4,
+    "tempCharges": 0,
+    "grabCharges": 0,
+    "siphonCharges": 0
+  }
+}
